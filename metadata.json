@@ -1,0 +1,8 @@
+{
+  "name": "VibPlay",
+  "description": "VibPlay - Reproductor de Audio y Video de alta fidelidad con 4 temas visuales, ecualizador avanzado y soporte para pistas locales de audio y video.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
