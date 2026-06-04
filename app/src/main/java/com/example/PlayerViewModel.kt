@@ -83,6 +83,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var currentTrackCountedId: Long? = null
 
     val isFloatingBubbleEnabled = MutableStateFlow(false)
+    val isBackgroundPlaybackPremiumEnabled = MutableStateFlow(true)
 
     // Queue Manager
     val currentQueue = MutableStateFlow<List<TrackEntity>>(emptyList())
@@ -110,6 +111,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         val bubbleEnabled = sharedPrefs.getBoolean("bubble_enabled", false)
         isFloatingBubbleEnabled.value = bubbleEnabled
+
+        val bgPremiumEnabled = sharedPrefs.getBoolean("bg_playback_premium_enabled", true)
+        isBackgroundPlaybackPremiumEnabled.value = bgPremiumEnabled
 
         val secondsVal = sharedPrefs.getLong("listening_secs", 0L)
         totalListeningTimeMinutes.value = secondsVal / 60
@@ -288,6 +292,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             // Deep storage scanning for any exotic audio/video format not caught by MediaStore
             try {
                 val existingPaths = allTracks.value.map { it.filePath }.toSet()
+                val foundPaths = foundTracks.map { it.filePath }.toMutableSet()
                 val rootsToScan = mutableListOf<java.io.File>()
                 
                 // Primary external storage root
@@ -327,7 +332,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     for (subName in subDirNames) {
                         val subDir = java.io.File(root, subName)
                         if (subDir.exists() && subDir.isDirectory) {
-                            scanDirectoryForMedia(subDir, foundTracks, existingPaths)
+                            scanDirectoryForMedia(subDir, foundTracks, existingPaths, foundPaths)
                         }
                     }
                 }
@@ -345,17 +350,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun scanDirectoryForMedia(directory: java.io.File, foundTracks: MutableList<TrackEntity>, existingPaths: Set<String>, depth: Int = 0) {
+    private fun scanDirectoryForMedia(
+        directory: java.io.File,
+        foundTracks: MutableList<TrackEntity>,
+        existingPaths: Set<String>,
+        foundPaths: MutableSet<String>,
+        depth: Int = 0
+    ) {
         if (depth > 3) return // Max recursion depth to prevent infinite loops and sluggish scanning
         val files = directory.listFiles() ?: return
         for (file in files) {
             if (file.isDirectory) {
                 if (file.name != "Android" && !file.name.startsWith(".")) {
-                    scanDirectoryForMedia(file, foundTracks, existingPaths, depth + 1)
+                    scanDirectoryForMedia(file, foundTracks, existingPaths, foundPaths, depth + 1)
                 }
             } else if (file.isFile) {
                 val path = file.absolutePath
-                if (existingPaths.contains(path) || foundTracks.any { it.filePath == path }) continue
+                if (existingPaths.contains(path) || !foundPaths.add(path)) continue
                 val ext = file.extension.lowercase()
                 
                 // Absolute global support of ALL standard & exotic audio/video format extensions
@@ -431,6 +442,27 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         AudioEngine.playTrack(getApplication(), track)
+    }
+
+    fun playVideoAsBackgroundAudio(track: TrackEntity, startPosMs: Int) {
+        val videos = allTracks.value.filter { it.isVideo }
+        currentQueue.value = videos
+        val idx = videos.indexOfFirst { it.id == track.id }
+        currentQueueIndex.value = if (idx != -1) idx else 0
+
+        currentTrackCountedId = track.id
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = track.copy(
+                lastPlayedAt = System.currentTimeMillis()
+            )
+            repository.updateTrack(updated)
+        }
+
+        AudioEngine.playTrack(getApplication(), track)
+        if (startPosMs > 0) {
+            AudioEngine.seekTo(startPosMs)
+        }
     }
 
     fun playOrPause() {
@@ -758,6 +790,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun setFloatingBubbleEnabled(enabled: Boolean, context: Context) {
         isFloatingBubbleEnabled.value = enabled
         sharedPrefs.edit().putBoolean("bubble_enabled", enabled).apply()
+    }
+
+    fun setBackgroundPlaybackPremiumEnabled(enabled: Boolean) {
+        isBackgroundPlaybackPremiumEnabled.value = enabled
+        sharedPrefs.edit().putBoolean("bg_playback_premium_enabled", enabled).apply()
     }
 
     fun stopPlayback() {

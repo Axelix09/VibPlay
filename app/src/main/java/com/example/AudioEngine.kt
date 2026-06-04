@@ -334,10 +334,10 @@ object AudioEngine {
 
         initMediaSession(context)
 
-        val piPlay = PendingIntent.getBroadcast(context, 1, Intent(ACTION_PLAY_PAUSE).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val piPrev = PendingIntent.getBroadcast(context, 2, Intent(ACTION_PREVIOUS).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val piNext = PendingIntent.getBroadcast(context, 3, Intent(ACTION_NEXT).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val piStop = PendingIntent.getBroadcast(context, 4, Intent(ACTION_STOP).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val piPlay = PendingIntent.getBroadcast(context, 1, Intent(context, MediaControlReceiver::class.java).setAction(ACTION_PLAY_PAUSE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val piPrev = PendingIntent.getBroadcast(context, 2, Intent(context, MediaControlReceiver::class.java).setAction(ACTION_PREVIOUS), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val piNext = PendingIntent.getBroadcast(context, 3, Intent(context, MediaControlReceiver::class.java).setAction(ACTION_NEXT), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val piStop = PendingIntent.getBroadcast(context, 4, Intent(context, MediaControlReceiver::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val clickIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP

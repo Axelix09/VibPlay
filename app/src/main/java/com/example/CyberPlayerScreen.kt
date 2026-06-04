@@ -223,6 +223,9 @@ fun CyberPlayerScreen(viewModel: PlayerViewModel = viewModel()) {
     var activePlaylistDetail by remember { mutableStateOf<PlaylistEntity?>(null) }
     val activeVideoTrack = remember { mutableStateOf<TrackEntity?>(null) }
 
+    val homeListState = rememberLazyListState()
+    val videosGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
     val context = LocalContext.current
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
 
@@ -297,7 +300,9 @@ fun CyberPlayerScreen(viewModel: PlayerViewModel = viewModel()) {
                                     colors = colors,
                                     activePlaylistDetail = activePlaylistDetail,
                                     onActivePlaylistDetailChange = { activePlaylistDetail = it },
-                                    onVideoSelect = { activeVideoTrack.value = it }
+                                    onVideoSelect = { activeVideoTrack.value = it },
+                                    homeListState = homeListState,
+                                    videosGridState = videosGridState
                                 )
                             }
                         }
@@ -310,7 +315,9 @@ fun CyberPlayerScreen(viewModel: PlayerViewModel = viewModel()) {
                                     colors = colors,
                                     activePlaylistDetail = activePlaylistDetail,
                                     onActivePlaylistDetailChange = { activePlaylistDetail = it },
-                                    onVideoSelect = { activeVideoTrack.value = it }
+                                    onVideoSelect = { activeVideoTrack.value = it },
+                                    homeListState = homeListState,
+                                    videosGridState = videosGridState
                                 )
                             }
                             if (activePlaylistDetail == null) {
@@ -437,7 +444,9 @@ fun MainContentSwitcher(
     colors: ThemeColors,
     activePlaylistDetail: PlaylistEntity?,
     onActivePlaylistDetailChange: (PlaylistEntity?) -> Unit,
-    onVideoSelect: (TrackEntity) -> Unit
+    onVideoSelect: (TrackEntity) -> Unit,
+    homeListState: androidx.compose.foundation.lazy.LazyListState,
+    videosGridState: androidx.compose.foundation.lazy.grid.LazyGridState
 ) {
     AnimatedContent(
         targetState = activeTab,
@@ -447,9 +456,9 @@ fun MainContentSwitcher(
         label = "tab_switch"
     ) { target ->
         when (target) {
-            "home" -> HomeScreen(viewModel, colors)
-            "library" -> LibraryScreen(viewModel, colors, activePlaylistDetail, onActivePlaylistDetailChange, onVideoSelect)
-            "player" -> PlayerScreen(viewModel, colors)
+            "home" -> HomeScreen(viewModel, colors, homeListState)
+            "library" -> LibraryScreen(viewModel, colors, activePlaylistDetail, onActivePlaylistDetailChange, onVideoSelect, videosGridState)
+            "player" -> PlayerScreen(viewModel, colors, onVideoSelect)
             "insights" -> InsightsScreen(viewModel, colors)
             "settings" -> SettingsScreen(viewModel, colors)
         }
@@ -589,7 +598,11 @@ fun SplashScreen(progress: Float, themeColors: ThemeColors) {
 // Home Tab
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
+fun HomeScreen(
+    viewModel: PlayerViewModel,
+    colors: ThemeColors,
+    listState: androidx.compose.foundation.lazy.LazyListState
+) {
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val appTheme by viewModel.currentTheme.collectAsStateWithLifecycle()
@@ -597,13 +610,6 @@ fun HomeScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
     var searchQuery by remember { mutableStateOf("") }
 
     val pullState = rememberPullToRefreshState()
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(isScanning) {
-        if (!isScanning) {
-            listState.animateScrollToItem(0)
-        }
-    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         HeaderTitleSection(appTheme, colors)
@@ -1822,7 +1828,8 @@ fun LibraryScreen(
     colors: ThemeColors,
     activePlaylistDetail: PlaylistEntity?,
     onActivePlaylistDetailChange: (PlaylistEntity?) -> Unit,
-    onVideoSelect: (TrackEntity) -> Unit
+    onVideoSelect: (TrackEntity) -> Unit,
+    videosGridState: androidx.compose.foundation.lazy.grid.LazyGridState
 ) {
     val tabs = remember(viewModel) {
         val list = mutableListOf("playlists", "videos", "folders")
@@ -1902,7 +1909,7 @@ fun LibraryScreen(
             ) { page ->
                 when (tabs[page]) {
                     "playlists" -> PlaylistsDashboard(viewModel, colors, null, onActivePlaylistDetailChange)
-                    "videos" -> VideosPanel(viewModel, colors, onVideoSelect)
+                    "videos" -> VideosPanel(viewModel, colors, videosGridState, onVideoSelect)
                     "folders" -> FoldersDashboard(viewModel, colors)
                     "sdcard" -> SdCardPanel(viewModel, colors)
                 }
@@ -2357,168 +2364,477 @@ fun PlaylistsDashboard(
 fun VideosPanel(
     viewModel: PlayerViewModel,
     colors: ThemeColors,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     onVideoSelect: (TrackEntity) -> Unit
 ) {
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
     val videos = allTracks.filter { it.isVideo }
 
-    if (videos.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No se detectaron videoclips de la librería local.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    var selectMode by remember { mutableStateOf(false) }
+    val selectedIds = remember { mutableStateListOf<Long>() }
+
+    var columnsCount by remember { mutableStateOf(2) }
+    var accumScale by remember { mutableStateOf(1f) }
+
+    var showMoveFolderDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+    fun shareVideos() {
+        val selectedVideos = videos.filter { selectedIds.contains(it.id) }
+        val uris = selectedVideos.mapNotNull { tr ->
+            try {
+                val file = java.io.File(tr.filePath)
+                if (file.exists()) {
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.provider",
+                        file
+                    )
+                } else null
+            } catch (e: Exception) {
+                null
+            }
         }
-    } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(videos) { track ->
-                val thumbnailState = produceState<Bitmap?>(initialValue = null, track.filePath) {
-                    value = withContext(Dispatchers.IO) { getVideoThumbnail(track.filePath) }
+        if (uris.isNotEmpty()) {
+            val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "video/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Compartir videos con VibPlay"))
+        } else {
+            val text = selectedVideos.joinToString("\n") { "🎬 ${it.displayTitle} (${it.folder})" }
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, "¡Mira mis videos favoritos en VibPlay!\n\n$text")
+            }
+            context.startActivity(Intent.createChooser(intent, "Compartir videos con VibPlay"))
+        }
+        selectedIds.clear()
+        selectMode = false
+    }
+
+    val transformState = rememberTransformableState { zoomChange, _, _ ->
+        accumScale *= zoomChange
+        if (accumScale > 1.35f) {
+            if (columnsCount > 1) {
+                columnsCount--
+            }
+            accumScale = 1f
+        } else if (accumScale < 0.65f) {
+            if (columnsCount < 5) {
+                columnsCount++
+            }
+            accumScale = 1f
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (selectMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.surface)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = {
+                    selectedIds.clear()
+                    selectMode = false
+                }) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Cancelar", tint = Color.White)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "${selectedIds.size} seleccionados",
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primary,
+                    modifier = Modifier.weight(1f)
+                )
+
+                IconButton(onClick = {
+                    if (selectedIds.size == videos.size) {
+                        selectedIds.clear()
+                        selectMode = false
+                    } else {
+                        selectedIds.clear()
+                        selectedIds.addAll(videos.map { it.id })
+                    }
+                }) {
+                    Icon(
+                        imageVector = if (selectedIds.size == videos.size) Icons.Rounded.CheckBoxOutlineBlank else Icons.Rounded.SelectAll,
+                        contentDescription = "Seleccionar todo",
+                        tint = Color.White
+                    )
                 }
 
-                var showContextSheet by remember { mutableStateOf(false) }
-                var showEditDialog by remember { mutableStateOf(false) }
-                var showPlaylistDialog by remember { mutableStateOf(false) }
-
-                val favTracks by viewModel.favoriteTracks.collectAsStateWithLifecycle()
-                val isFavorite = favTracks.any { it.id == track.id }
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(track.id) {
-                            detectTapGestures(
-                                onTap = { onVideoSelect(track) },
-                                onLongPress = { showContextSheet = true }
-                            )
-                        },
-                    colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(12.dp)
+                IconButton(
+                    onClick = { shareVideos() },
+                    enabled = selectedIds.isNotEmpty()
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp)
-                    ) {
-                        if (thumbnailState.value != null) {
-                            Image(
-                                bitmap = thumbnailState.value!!.asImageBitmap(),
-                                contentDescription = "Miniatura",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.6f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Videocam,
-                                    contentDescription = "Fallback",
-                                    tint = colors.primary.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
-
-                        // Play indicator overlay
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(colors.primary.copy(alpha = 0.85f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.Black, modifier = Modifier.size(20.dp))
-                        }
-
-                        // Duration banner
-                        if (track.duration > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp)
-                                    .background(Color.Black.copy(alpha = 0.7f))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = formatTime(track.duration.toInt()),
-                                    color = Color.White,
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text = track.displayTitle,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = track.folder,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Icon(Icons.Rounded.Share, contentDescription = "Compartir", tint = if (selectedIds.isNotEmpty()) Color.White else Color.DarkGray)
                 }
 
-                if (showContextSheet) {
-                    ContextMenuBottomSheet(
-                        track = track,
-                        isFavorite = isFavorite,
-                        onDismiss = { showContextSheet = false },
-                        colors = colors,
-                        onToggleFavorite = { viewModel.toggleFavorite(track) },
-                        onToggleEnglish = { viewModel.toggleEnglishTrack(track) },
-                        onEdit = {
-                            showEditDialog = true
-                            showContextSheet = false
-                        },
-                        onAddToPlaylist = {
-                            showPlaylistDialog = true
-                            showContextSheet = false
-                        },
-                        onDelete = {
-                            viewModel.deleteTrack(track)
-                            showContextSheet = false
-                        }
-                    )
+                IconButton(
+                    onClick = { showMoveFolderDialog = true },
+                    enabled = selectedIds.isNotEmpty()
+                ) {
+                    Icon(Icons.Rounded.FolderOpen, contentDescription = "Mover de carpeta", tint = if (selectedIds.isNotEmpty()) Color.White else Color.DarkGray)
                 }
 
-                if (showEditDialog) {
-                    MetadataEditDialog(
-                        track = track,
-                        colors = colors,
-                        onDismiss = { showEditDialog = false },
-                        onSave = { t, a, ur, f, perm ->
-                            viewModel.editTrackMetadata(track.id, t, a, ur, f, perm)
-                            showEditDialog = false
-                        }
-                    )
+                IconButton(
+                    onClick = { showDeleteConfirmDialog = true },
+                    enabled = selectedIds.isNotEmpty()
+                ) {
+                    Icon(Icons.Rounded.Delete, contentDescription = "Eliminar", tint = if (selectedIds.isNotEmpty()) colors.accent else Color.DarkGray)
                 }
-
-                if (showPlaylistDialog) {
-                    AddToPlaylistDialog(
-                        track = track,
-                        viewModel = viewModel,
-                        colors = colors,
-                        onDismiss = { showPlaylistDialog = false }
-                    )
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Columnas: $columnsCount (Pellizca para zoom)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = { if (columnsCount > 1) columnsCount-- },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Menos columnas", tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                IconButton(
+                    onClick = { if (columnsCount < 5) columnsCount++ },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(Icons.Rounded.AddCircleOutline, contentDescription = "Más columnas", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
         }
+
+        if (videos.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No se detectaron videoclips de la librería local.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columnsCount),
+                state = gridState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .transformable(state = transformState),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(videos) { track ->
+                    val thumbnailState = produceState<Bitmap?>(initialValue = null, track.filePath) {
+                        value = withContext(Dispatchers.IO) { getVideoThumbnail(track.filePath) }
+                    }
+
+                    var showContextSheet by remember { mutableStateOf(false) }
+                    var showEditDialog by remember { mutableStateOf(false) }
+                    var showPlaylistDialog by remember { mutableStateOf(false) }
+
+                    val favTracks by viewModel.favoriteTracks.collectAsStateWithLifecycle()
+                    val isFavorite = favTracks.any { it.id == track.id }
+                    val isSelected = selectedIds.contains(track.id)
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(track.id, selectMode) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (selectMode) {
+                                            if (isSelected) {
+                                                selectedIds.remove(track.id)
+                                                if (selectedIds.isEmpty()) {
+                                                    selectMode = false
+                                                }
+                                            } else {
+                                                selectedIds.add(track.id)
+                                            }
+                                        } else {
+                                            onVideoSelect(track)
+                                        }
+                                    },
+                                    onLongPress = {
+                                        if (!selectMode) {
+                                            selectMode = true
+                                            selectedIds.add(track.id)
+                                        } else {
+                                            showContextSheet = true
+                                        }
+                                    }
+                                )
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) colors.primary.copy(alpha = 0.25f) else colors.surface.copy(alpha = 0.5f)
+                        ),
+                        border = if (isSelected) BorderStroke(1.5.dp, colors.primary) else null,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp)
+                        ) {
+                            if (thumbnailState.value != null) {
+                                Image(
+                                    bitmap = thumbnailState.value!!.asImageBitmap(),
+                                    contentDescription = "Miniatura",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.6f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Videocam,
+                                        contentDescription = "Fallback",
+                                        tint = colors.primary.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
+                            }
+
+                            if (selectMode) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(6.dp)
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isSelected) colors.primary else Color.Black.copy(alpha = 0.5f)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) Color.Transparent else Color.White,
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.primary.copy(alpha = 0.85f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.Black, modifier = Modifier.size(20.dp))
+                                }
+                            }
+
+                            if (track.duration > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp)
+                                        .background(Color.Black.copy(alpha = 0.7f))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = formatTime(track.duration.toInt()),
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text = track.displayTitle,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = track.folder,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (showContextSheet) {
+                        ContextMenuBottomSheet(
+                            track = track,
+                            isFavorite = isFavorite,
+                            onDismiss = { showContextSheet = false },
+                            colors = colors,
+                            onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            onToggleEnglish = { viewModel.toggleEnglishTrack(track) },
+                            onEdit = {
+                                showEditDialog = true
+                                showContextSheet = false
+                            },
+                            onAddToPlaylist = {
+                                showPlaylistDialog = true
+                                showContextSheet = false
+                            },
+                            onDelete = {
+                                viewModel.deleteTrack(track)
+                                showContextSheet = false
+                            },
+                            onEnterSelectMode = {
+                                selectMode = true
+                                selectedIds.add(track.id)
+                                showContextSheet = false
+                            },
+                            onSelectAll = {
+                                selectMode = true
+                                selectedIds.clear()
+                                selectedIds.addAll(videos.map { it.id })
+                                showContextSheet = false
+                            }
+                        )
+                    }
+
+                    if (showEditDialog) {
+                        MetadataEditDialog(
+                            track = track,
+                            colors = colors,
+                            onDismiss = { showEditDialog = false },
+                            onSave = { t, a, ur, f, perm ->
+                                viewModel.editTrackMetadata(track.id, t, a, ur, f, perm)
+                                showEditDialog = false
+                            }
+                        )
+                    }
+
+                    if (showPlaylistDialog) {
+                        AddToPlaylistDialog(
+                            track = track,
+                            viewModel = viewModel,
+                            colors = colors,
+                            onDismiss = { showPlaylistDialog = false }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showMoveFolderDialog) {
+        var newFolder by remember { mutableStateOf("") }
+        val folders by viewModel.availableFolders.collectAsStateWithLifecycle()
+
+        AlertDialog(
+            onDismissRequest = { showMoveFolderDialog = false },
+            containerColor = colors.surface,
+            title = { Text("Mover Videos de Carpeta", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Selecciona una carpeta o escribe una nueva para los videos seleccionados:", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyRow(modifier = Modifier.fillMaxWidth()) {
+                        items(folders) { f ->
+                            SuggestionChip(
+                                onClick = { newFolder = f },
+                                label = { Text(f) },
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = newFolder,
+                        onValueChange = { newFolder = it },
+                        label = { Text("Nombre de carpeta") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
+                            focusedLabelColor = colors.primary,
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
+                            cursorColor = colors.primary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newFolder.isNotBlank()) {
+                            viewModel.moveTracksToFolder(selectedIds.toList(), newFolder, isPermanent = true)
+                            selectedIds.clear()
+                            selectMode = false
+                            showMoveFolderDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black)
+                ) {
+                    Text("Mover")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMoveFolderDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            containerColor = colors.surface,
+            title = { Text("Eliminar videos", fontWeight = FontWeight.Bold, color = Color.White) },
+            text = { Text("¿Estás seguro de que deseas eliminar los ${selectedIds.size} videos seleccionados de tu lista?", color = Color.LightGray) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        selectedIds.forEach { id ->
+                            videos.find { it.id == id }?.let { viewModel.deleteTrack(it) }
+                        }
+                        selectedIds.clear()
+                        selectMode = false
+                        showDeleteConfirmDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = Color.White)
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancelar", color = Color.White)
+                }
+            }
+        )
     }
 }
 
@@ -3111,7 +3427,11 @@ fun CyberCircularDial(
 
 // Full Player tab Screen
 @Composable
-fun PlayerScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
+fun PlayerScreen(
+    viewModel: PlayerViewModel,
+    colors: ThemeColors,
+    onWatchVideo: (TrackEntity) -> Unit
+) {
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
 
     if (currentTrack == null) {
@@ -3128,7 +3448,7 @@ fun PlayerScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
             Text("Ninguna pista activa en este momento.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
     } else {
-        PlayerConsoleHub(track = currentTrack!!, viewModel = viewModel, colors = colors)
+        PlayerConsoleHub(track = currentTrack!!, viewModel = viewModel, colors = colors, onWatchVideo = onWatchVideo)
     }
 }
 
@@ -3136,7 +3456,8 @@ fun PlayerScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
 fun PlayerConsoleHub(
     track: TrackEntity,
     viewModel: PlayerViewModel,
-    colors: ThemeColors
+    colors: ThemeColors,
+    onWatchVideo: (TrackEntity) -> Unit
 ) {
     val context = LocalContext.current
     val isPlaying by AudioEngine.isPlaying.collectAsStateWithLifecycle()
@@ -3221,6 +3542,20 @@ fun PlayerConsoleHub(
             color = colors.primary,
             modifier = Modifier.padding(top = 4.dp)
         )
+
+        if (track.isVideo) {
+            Button(
+                onClick = { onWatchVideo(track) },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary.copy(alpha = 0.15f), contentColor = colors.primary),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.35f)),
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Icon(Icons.Rounded.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Reproducir como Video (Modo Premium)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -3695,6 +4030,51 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        val bgPlaybackPremiumEnabled by viewModel.isBackgroundPlaybackPremiumEnabled.collectAsStateWithLifecycle()
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.15f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Star, contentDescription = null, tint = Color(0xFFFFD700))
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Modo Premium: Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFFFD700), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text("PRO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
+                        }
+                        Text(
+                            text = "Reproducir los videos en segundo plano automáticamente al minimizar la app.",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = bgPlaybackPremiumEnabled,
+                        onCheckedChange = { chk ->
+                            viewModel.setBackgroundPlaybackPremiumEnabled(chk)
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = colors.primary, checkedTrackColor = colors.primary.copy(alpha = 0.35f))
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
         Box(
             modifier = Modifier
@@ -3873,12 +4253,34 @@ fun VideoPlayerFrameOverlay(
     var videoZoom by remember { mutableFloatStateOf(1f) }
     val isPlayingVideo = remember { mutableStateOf(true) }
 
-    val pos = remember { mutableStateOf(0) }
+    val initialPos = if (AudioEngine.currentTrackId.value == track.id) AudioEngine.currentPosition.value else 0
+    val pos = remember(track.id) { mutableStateOf(initialPos) }
     val dur = remember { mutableStateOf(0) }
     var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
 
     val transformState = rememberTransformableState { zoomChange, _, _ ->
         videoZoom = (videoZoom * zoomChange).coerceIn(1f, 5f)
+    }
+
+    val isBgPremiumEnabled by viewModel.isBackgroundPlaybackPremiumEnabled.collectAsStateWithLifecycle()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, track, isBgPremiumEnabled) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP || event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                if (isBgPremiumEnabled && isPlayingVideo.value) {
+                    val currentPos = if (track.filePath.startsWith("/simulated/")) pos.value else {
+                        videoViewInstance?.currentPosition ?: pos.value
+                    }
+                    viewModel.playVideoAsBackgroundAudio(track, currentPos)
+                    onClose()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Intercept back button to close/minimize the video view instead of exiting!
@@ -3928,7 +4330,12 @@ fun VideoPlayerFrameOverlay(
             // Render highly interactive cyber generative canvas instead of real VideoView!
             LaunchedEffect(track.id) {
                 dur.value = if (track.duration > 0) track.duration.toInt() else 180000
-                pos.value = 0
+                val startPos = if (AudioEngine.currentTrackId.value == track.id) {
+                    val sp = AudioEngine.currentPosition.value
+                    AudioEngine.pause()
+                    sp
+                } else 0
+                pos.value = startPos
             }
             Canvas(
                 modifier = Modifier
@@ -3969,6 +4376,12 @@ fun VideoPlayerFrameOverlay(
                             setOnPreparedListener { mp ->
                                 mp.isLooping = true
                                 dur.value = duration
+                                if (AudioEngine.currentTrackId.value == track.id) {
+                                    val startPos = AudioEngine.currentPosition.value
+                                    seekTo(startPos)
+                                    pos.value = startPos
+                                    AudioEngine.pause()
+                                }
                                 start()
                                 isPlayingVideo.value = true
                             }
@@ -4025,6 +4438,22 @@ fun VideoPlayerFrameOverlay(
                         }
                     }) {
                         Icon(Icons.Rounded.Share, contentDescription = "Compartir", tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // Premium Background Play Button
+                    IconButton(onClick = {
+                        val currentPos = if (track.filePath.startsWith("/simulated/")) pos.value else {
+                            videoViewInstance?.currentPosition ?: pos.value
+                        }
+                        viewModel.playVideoAsBackgroundAudio(track, currentPos)
+                        onClose()
+                        Toast.makeText(context, "⭐ Modo Premium: Audio en segundo plano activado", Toast.LENGTH_LONG).show()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Headset,
+                            contentDescription = "Segundo plano (Premium)",
+                            tint = colors.primary
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     IconButton(onClick = {
