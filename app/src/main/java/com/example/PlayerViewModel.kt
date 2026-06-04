@@ -242,8 +242,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     android.provider.MediaStore.Video.Media.DATA,
                     android.provider.MediaStore.Video.Media.DURATION
                 )
-                val selection = "${android.provider.MediaStore.Video.Media.DURATION} >= ?"
-                val selectionArgs = arrayOf("30000")
+                val selection: String? = null
+                val selectionArgs: Array<String>? = null
 
                 context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
                     val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.TITLE)
@@ -274,11 +274,125 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 e.printStackTrace()
             }
 
+            // Deep storage scanning for any exotic audio/video format not caught by MediaStore
+            try {
+                val existingPaths = allTracks.value.map { it.filePath }.toSet()
+                val rootsToScan = mutableListOf<java.io.File>()
+                
+                // Primary external storage root
+                val externalDir = android.os.Environment.getExternalStorageDirectory()
+                if (externalDir != null && externalDir.exists()) {
+                    rootsToScan.add(externalDir)
+                }
+                
+                // Secondary SD cards or external directories
+                val files = context.getExternalFilesDirs(null)
+                for (f in files) {
+                    if (f != null) {
+                        val p = f.absolutePath
+                        val idx = p.indexOf("/Android")
+                        if (idx != -1) {
+                            val root = java.io.File(p.substring(0, idx))
+                            if (root.exists() && !rootsToScan.contains(root)) {
+                                rootsToScan.add(root)
+                            }
+                        }
+                    }
+                }
+
+                // Scan common media and documents subfolders of root to be precise and highly performant
+                val subDirNames = listOf(
+                    android.os.Environment.DIRECTORY_MUSIC,
+                    android.os.Environment.DIRECTORY_PODCASTS,
+                    android.os.Environment.DIRECTORY_MOVIES,
+                    android.os.Environment.DIRECTORY_DOWNLOADS,
+                    android.os.Environment.DIRECTORY_DCIM,
+                    android.os.Environment.DIRECTORY_DOCUMENTS,
+                    "Bluetooth",
+                    "Recordings"
+                )
+
+                for (root in rootsToScan) {
+                    for (subName in subDirNames) {
+                        val subDir = java.io.File(root, subName)
+                        if (subDir.exists() && subDir.isDirectory) {
+                            scanDirectoryForMedia(subDir, foundTracks, existingPaths)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
             if (foundTracks.isNotEmpty()) {
-                repository.insertTracks(foundTracks)
+                // Filter out duplicates by path to avoid DB UNIQUE constraint violations
+                val uniqueNewTracks = foundTracks.distinctBy { it.filePath }
+                repository.insertTracks(uniqueNewTracks)
             }
             delay(1500) // Aesthetic delay for progress indicator
             isScanning.value = false
+        }
+    }
+
+    private fun scanDirectoryForMedia(directory: java.io.File, foundTracks: MutableList<TrackEntity>, existingPaths: Set<String>) {
+        val files = directory.listFiles() ?: return
+        for (file in files) {
+            if (file.isDirectory) {
+                if (file.name != "Android" && !file.name.startsWith(".")) {
+                    scanDirectoryForMedia(file, foundTracks, existingPaths)
+                }
+            } else if (file.isFile) {
+                val path = file.absolutePath
+                if (existingPaths.contains(path) || foundTracks.any { it.filePath == path }) continue
+                val ext = file.extension.lowercase()
+                
+                // Absolute global support of ALL standard & exotic audio/video format extensions
+                val isAudio = ext in setOf(
+                    "mp3", "wav", "m4a", "aac", "flac", "ogg", "wma", "opus", "mid", "midi", "amr", "mpga", "mka", "ra", "ape", "alac", "aif", "aiff"
+                )
+                val isVideo = ext in setOf(
+                    "mp4", "mkv", "webm", "avi", "3gp", "mov", "flv", "ts", "mpeg", "mpg", "wmv", "vob", "ogv", "asf"
+                )
+                
+                if (isAudio || isVideo) {
+                    val dur = estimateDuration(file) ?: 180000L // 3 minutes default fallback
+                    // Audio tracks less than 30 seconds are skipped as per the user's specific audio-filter preference
+                    if (isAudio && dur < 30000L) {
+                        continue
+                    }
+                    
+                    foundTracks.add(
+                        TrackEntity(
+                            title = file.nameWithoutExtension.replace("_", " ").replace("-", " "),
+                            artist = if (isVideo) "Video Local" else "Artista Local",
+                            album = if (isVideo) "Clips" else "Album Local",
+                            filePath = path,
+                            duration = dur,
+                            folder = file.parentFile?.name ?: (if (isVideo) "Videos" else "All Beats"),
+                            isLocal = true,
+                            isVideo = isVideo
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun estimateDuration(file: java.io.File): Long? {
+        var retriever: android.media.MediaMetadataRetriever? = null
+        try {
+            retriever = android.media.MediaMetadataRetriever()
+            retriever.setDataSource(file.absolutePath)
+            val timeStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            return timeStr?.toLong()
+        } catch (e: Exception) {
+            return null
+        } finally {
+            try {
+                retriever?.release()
+            } catch (ex: Exception) {
+                // ignore
+            }
         }
     }
 

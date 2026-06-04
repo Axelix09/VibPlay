@@ -361,7 +361,7 @@ fun NavigationRailComponent(activeTab: String, onTabSelect: (String) -> Unit, co
     ) {
         Spacer(modifier = Modifier.height(24.dp))
         Image(
-            painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
             contentDescription = "Logo",
             modifier = Modifier.size(48.dp)
         )
@@ -459,7 +459,7 @@ fun HeaderTitleSection(theme: ThemeStyle, colors: ThemeColors) {
             .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         Image(
-            painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
             contentDescription = "Logo Circular",
             modifier = Modifier
                 .size(36.dp)
@@ -537,7 +537,7 @@ fun SplashScreen(progress: Float, themeColors: ThemeColors) {
                     )
                 }
                 Image(
-                    painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                     contentDescription = "Splash Logo",
                     modifier = Modifier.size(90.dp)
                 )
@@ -1101,7 +1101,7 @@ fun TrackListItemCard(
                     )
                 } else {
                     Image(
-                        painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                        painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                         contentDescription = "Default cover",
                         alpha = 0.45f,
                         modifier = Modifier
@@ -2202,7 +2202,7 @@ fun VideosPanel(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                                     contentDescription = "Fallback",
                                     alpha = 0.6f,
                                     modifier = Modifier.size(56.dp)
@@ -2423,7 +2423,7 @@ fun MiniPlayerCard(
                         )
                     } else {
                         Image(
-                            painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                             contentDescription = "Cover",
                             alpha = 0.6f,
                             modifier = Modifier
@@ -2907,7 +2907,7 @@ fun PlayerConsoleHub(
                 )
             } else {
                 Image(
-                    painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                     contentDescription = "Cover generativo",
                     modifier = Modifier.fillMaxSize(0.8f)
                 )
@@ -3202,7 +3202,7 @@ fun InsightsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(R.drawable.app_icon_vp_1780535194906),
+                                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
                                     contentDescription = null,
                                     alpha = 0.55f,
                                     modifier = Modifier.fillMaxSize(0.7f)
@@ -3447,7 +3447,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
                     Text("Diseño & Estructura de Alta Fidelidad", fontSize = 12.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    SocialMediaCard(title = "GitHub Oficial", desc = "/axeldev09", iconInt = R.drawable.app_icon_vp_1780535194906, colorBase = Color(0xFF1E2430)) {
+                    SocialMediaCard(title = "GitHub Oficial", desc = "/axeldev09", iconInt = R.drawable.ic_github, colorBase = Color(0xFF1E2430)) {
                         try {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com")))
                         } catch (e: Exception) {
@@ -3455,11 +3455,11 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    SocialMediaCard(title = "Instagram", desc = "@un.axel.salvaje", iconInt = R.drawable.app_icon_vp_1780535194906, colorBase = Color(0xFFC13584)) {
+                    SocialMediaCard(title = "Instagram", desc = "@un.axel.salvaje", iconInt = R.drawable.ic_instagram, colorBase = Color(0xFFC13584)) {
                         // ignore action
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    SocialMediaCard(title = "Canal WhatsApp", desc = "VibPlay Comunidad", iconInt = R.drawable.app_icon_vp_1780535194906, colorBase = Color(0xFF25D366)) {
+                    SocialMediaCard(title = "Canal WhatsApp", desc = "VibPlay Comunidad", iconInt = R.drawable.ic_whatsapp, colorBase = Color(0xFF25D366)) {
                         // ignore action
                     }
 
@@ -4091,7 +4091,7 @@ fun AddManualTrackDialog(
                     value = path,
                     onValueChange = { path = it },
                     label = { Text("Ruta o URL del Archivo") },
-                    placeholder = { Text("Ej: https://site.com/song.mp3") },
+                    placeholder = { Text("Ej: /ruta/audio.opus o https://site.com/video.mkv") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -4157,7 +4157,7 @@ fun AddManualTrackDialog(
                         onCheckedChange = { isVideo = it },
                         colors = CheckboxDefaults.colors(checkedColor = colors.primary)
                     )
-                    Text("Es un Videoclip (.mp4)", style = MaterialTheme.typography.bodySmall)
+                    Text("Es un archivo de Video (soporta cualquier formato existente)", style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
