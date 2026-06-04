@@ -1301,6 +1301,27 @@ fun ContextMenuBottomSheet(
                 leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null, tint = Color.White) }
             )
 
+            val shareContext = androidx.compose.ui.platform.LocalContext.current
+            DropdownMenuItem(
+                text = { Text("Compartir", color = Color.White) },
+                onClick = {
+                    try {
+                        val shareText = "¡Escuchando ${track.displayTitle} de ${track.displayArtist} en VibPlay!"
+                        val sendIntent = Intent().apply {
+                            action = Intent.ACTION_SEND
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                            type = "text/plain"
+                        }
+                        val shareIntent = Intent.createChooser(sendIntent, "Compartir pista con")
+                        shareContext.startActivity(shareIntent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    onDismiss()
+                },
+                leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null, tint = Color.White) }
+            )
+
             if (playlistId != null && onRemoveFromPlaylist != null) {
                 DropdownMenuItem(
                     text = { Text("Quitar de esta playlist", color = Color.White) },

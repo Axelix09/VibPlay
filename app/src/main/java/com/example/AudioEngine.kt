@@ -12,6 +12,9 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.Virtualizer
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import android.support.v4.media.MediaMetadataCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -37,6 +40,7 @@ object AudioEngine {
     var playPrevAction: (() -> Unit)? = null
     private var appContext: android.content.Context? = null
     internal var activeTrack: TrackEntity? = null
+    private var mediaSession: MediaSessionCompat? = null
 
     const val CHANNEL_ID = "vibplay_channel"
     const val NOTIFICATION_ID = 808
@@ -53,6 +57,8 @@ object AudioEngine {
     fun playTrack(context: Context, track: TrackEntity) {
         appContext = context.applicationContext
         activeTrack = track
+        initMediaSession(context)
+        mediaSession?.isActive = true
         try {
             isSynthetic = false
             if (mediaPlayer == null) {
@@ -86,6 +92,8 @@ object AudioEngine {
             mediaPlayer?.start()
             isPlaying.value = true
             startPositionTracker()
+            updateMetadata(track)
+            updatePlaybackState()
         } catch (e: Exception) {
             // Enter synthetic simulation fallback mode!
             isSynthetic = true
@@ -94,6 +102,8 @@ object AudioEngine {
             isPlaying.value = true
             currentPosition.value = 0
             startSyntheticPlaybackTracker()
+            updateMetadata(track)
+            updatePlaybackState()
         }
 
         showPlaybackNotification(context, track)
@@ -114,6 +124,7 @@ object AudioEngine {
                 startSyntheticPlaybackTracker()
             }
         }
+        updatePlaybackState()
         appContext?.let { ctx -> activeTrack?.let { showPlaybackNotification(ctx, it) } }
     }
 
@@ -127,6 +138,7 @@ object AudioEngine {
                 e.printStackTrace()
             }
         }
+        updatePlaybackState()
         appContext?.let { ctx -> activeTrack?.let { showPlaybackNotification(ctx, it) } }
     }
 
@@ -141,6 +153,7 @@ object AudioEngine {
                 currentPosition.value = ms
             }
         }
+        updatePlaybackState()
     }
 
     fun setSpeed(speed: Float) {
@@ -183,6 +196,7 @@ object AudioEngine {
         currentPosition.value = 0
         duration.value = 0
         isPlaying.value = false
+        mediaSession?.isActive = false
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         notificationManager?.cancel(NOTIFICATION_ID)
     }
@@ -318,6 +332,8 @@ object AudioEngine {
             manager.createNotificationChannel(channel)
         }
 
+        initMediaSession(context)
+
         val piPlay = PendingIntent.getBroadcast(context, 1, Intent(ACTION_PLAY_PAUSE).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val piPrev = PendingIntent.getBroadcast(context, 2, Intent(ACTION_PREVIOUS).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val piNext = PendingIntent.getBroadcast(context, 3, Intent(ACTION_NEXT).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -330,6 +346,8 @@ object AudioEngine {
 
         val playIcon = if (isPlaying.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
 
+        val sessionToken = mediaSession?.sessionToken
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(track.displayTitle)
@@ -339,6 +357,7 @@ object AudioEngine {
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setShowActionsInCompactView(0, 1, 2)
+                    .setMediaSession(sessionToken)
             )
             .addAction(android.R.drawable.ic_media_previous, "Previous", piPrev)
             .addAction(playIcon, "Play/Pause", piPlay)
@@ -348,6 +367,57 @@ object AudioEngine {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         manager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun initMediaSession(context: Context) {
+        if (mediaSession == null) {
+            mediaSession = MediaSessionCompat(context.applicationContext, "VibPlaySession").apply {
+                isActive = true
+                setCallback(object : MediaSessionCompat.Callback() {
+                    override fun onPlay() {
+                        play()
+                    }
+                    override fun onPause() {
+                        pause()
+                    }
+                    override fun onSkipToNext() {
+                        playNextAction?.invoke()
+                    }
+                    override fun onSkipToPrevious() {
+                        playPrevAction?.invoke()
+                    }
+                    override fun onStop() {
+                        stopAndClearNotification(context)
+                    }
+                })
+            }
+        }
+    }
+
+    private fun updatePlaybackState() {
+        val state = if (isPlaying.value) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+        val actions = PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                PlaybackStateCompat.ACTION_STOP
+        
+        mediaSession?.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setState(state, currentPosition.value.toLong(), playbackSpeed.value)
+                .setActions(actions)
+                .build()
+        )
+    }
+
+    private fun updateMetadata(track: TrackEntity) {
+        val metadataBuilder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.displayTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.displayArtist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration.value.toLong())
+        
+        mediaSession?.setMetadata(metadataBuilder.build())
     }
 }
 
