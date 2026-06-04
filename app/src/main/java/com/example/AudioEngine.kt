@@ -33,6 +33,9 @@ object AudioEngine {
     private var isSynthetic = false
 
     var onPlaybackCompleted: (() -> Unit)? = null
+    var playNextAction: (() -> Unit)? = null
+    var playPrevAction: (() -> Unit)? = null
+    private var appContext: android.content.Context? = null
     internal var activeTrack: TrackEntity? = null
 
     const val CHANNEL_ID = "vibplay_channel"
@@ -48,6 +51,7 @@ object AudioEngine {
     }
 
     fun playTrack(context: Context, track: TrackEntity) {
+        appContext = context.applicationContext
         activeTrack = track
         try {
             isSynthetic = false
@@ -110,6 +114,7 @@ object AudioEngine {
                 startSyntheticPlaybackTracker()
             }
         }
+        appContext?.let { ctx -> activeTrack?.let { showPlaybackNotification(ctx, it) } }
     }
 
     fun pause() {
@@ -122,6 +127,7 @@ object AudioEngine {
                 e.printStackTrace()
             }
         }
+        appContext?.let { ctx -> activeTrack?.let { showPlaybackNotification(ctx, it) } }
     }
 
     fun seekTo(ms: Int) {
@@ -317,6 +323,11 @@ object AudioEngine {
         val piNext = PendingIntent.getBroadcast(context, 3, Intent(ACTION_NEXT).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val piStop = PendingIntent.getBroadcast(context, 4, Intent(ACTION_STOP).setPackage(context.packageName), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
+        val clickIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val piContent = PendingIntent.getActivity(context, 0, clickIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
         val playIcon = if (isPlaying.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -324,6 +335,7 @@ object AudioEngine {
             .setContentTitle(track.displayTitle)
             .setContentText(track.displayArtist)
             .setSubText(track.album.ifEmpty { "VibPlay" })
+            .setContentIntent(piContent)
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setShowActionsInCompactView(0, 1, 2)
@@ -344,7 +356,6 @@ class MediaControlReceiver : BroadcastReceiver() {
         val ctx = context ?: return
         val action = intent?.action ?: return
         
-        // To pass instructions back to ViewModel / UI, let's trigger through viewModel callback or direct AudioEngine command.
         when (action) {
             AudioEngine.ACTION_PLAY_PAUSE -> {
                 if (AudioEngine.isPlaying.value) {
@@ -352,23 +363,15 @@ class MediaControlReceiver : BroadcastReceiver() {
                 } else {
                     AudioEngine.play()
                 }
-                AudioEngine.activeTrack?.let { AudioEngine.showPlaybackNotification(ctx, it) }
-                // Send local broadcast or set state
-                val uiIntent = Intent("com.example.VIBPLAY_UI_REFRESH")
-                ctx.sendBroadcast(uiIntent)
             }
             AudioEngine.ACTION_PREVIOUS -> {
-                val prevIntent = Intent("com.example.VIBPLAY_UI_PREV")
-                ctx.sendBroadcast(prevIntent)
+                AudioEngine.playPrevAction?.invoke()
             }
             AudioEngine.ACTION_NEXT -> {
-                val nextIntent = Intent("com.example.VIBPLAY_UI_NEXT")
-                ctx.sendBroadcast(nextIntent)
+                AudioEngine.playNextAction?.invoke()
             }
             AudioEngine.ACTION_STOP -> {
                 AudioEngine.stopAndClearNotification(ctx)
-                val stopIntent = Intent("com.example.VIBPLAY_UI_STOP")
-                ctx.sendBroadcast(stopIntent)
             }
         }
     }

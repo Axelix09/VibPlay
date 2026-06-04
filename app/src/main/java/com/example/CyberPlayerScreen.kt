@@ -18,6 +18,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -26,6 +28,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -1568,6 +1573,125 @@ fun AddToPlaylistDialog(
 }
 
 @Composable
+fun AddSongsToPlaylistDialog(
+    playlistId: Long,
+    viewModel: PlayerViewModel,
+    colors: ThemeColors,
+    onDismiss: () -> Unit
+) {
+    val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
+    val listTracks by viewModel.getTracksForPlaylistFlow(playlistId).collectAsStateWithLifecycle(emptyList())
+
+    val availableTracks = remember(allTracks, listTracks) {
+        allTracks.filter { track -> !listTracks.any { it.id == track.id } }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        title = {
+            Text(
+                "Añadir canciones a la playlist",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Selecciona canciones de tu librería para añadirlas directamente:",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (availableTracks.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Todas las canciones ya están añadidas.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(availableTracks) { track ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.addTrackToPlaylist(playlistId, track.id)
+                                    },
+                                colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.5f)),
+                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (track.isVideo) Icons.Rounded.Videocam else Icons.Rounded.MusicNote,
+                                        contentDescription = null,
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = track.displayTitle,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = track.displayArtist,
+                                            fontSize = 11.sp,
+                                            color = Color.Gray,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Rounded.AddCircle,
+                                        contentDescription = "Añadir",
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
+            ) {
+                Text("Listo", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+@Composable
 fun CreatePlaylistDialog(viewModel: PlayerViewModel, colors: ThemeColors, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
@@ -1890,6 +2014,7 @@ fun PlaylistsDashboard(
     var showCreate by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var isReorderMode by remember { mutableStateOf(false) }
+    var showAddSongsDialog by remember { mutableStateOf(false) }
 
     if (activePlaylistDetail != null) {
         // Find the fresh model from playlists flow in case it was updated under the hood
@@ -1936,6 +2061,18 @@ fun PlaylistsDashboard(
                 Text("Playlist", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = colors.primary)
                 Spacer(modifier = Modifier.weight(1f))
                 
+                // Add songs directly button
+                TextButton(
+                    onClick = { showAddSongsDialog = true },
+                    colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Añadir", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Añadir")
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 // Edit playlist details button
                 IconButton(onClick = { showEditDialog = true }) {
                     Icon(Icons.Rounded.Edit, contentDescription = "Editar Playlist", tint = Color.White)
@@ -2016,7 +2153,35 @@ fun PlaylistsDashboard(
 
             if (sortedTracks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Lista vacía. Long-press en home para añadir pistas.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Icon(Icons.Rounded.QueueMusic, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Lista vacía",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Añade ritmos de tu librería local a esta playlist.",
+                            color = Color.Gray,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Button(
+                            onClick = { showAddSongsDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black)
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Añadir Canciones", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             } else {
                 if (isReorderMode) {
@@ -2082,6 +2247,15 @@ fun PlaylistsDashboard(
                 viewModel = viewModel,
                 colors = colors,
                 onDismiss = { showEditDialog = false }
+            )
+        }
+
+        if (showAddSongsDialog) {
+            AddSongsToPlaylistDialog(
+                playlistId = freshPlaylist.id,
+                viewModel = viewModel,
+                colors = colors,
+                onDismiss = { showAddSongsDialog = false }
             )
         }
     } else {
@@ -2172,26 +2346,41 @@ fun VideosPanel(
             Text("No se detectaron videoclips de la librería local.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
     } else {
-        LazyColumn(
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(videos) { track ->
                 val thumbnailState = produceState<Bitmap?>(initialValue = null, track.filePath) {
                     value = withContext(Dispatchers.IO) { getVideoThumbnail(track.filePath) }
                 }
 
+                var showContextSheet by remember { mutableStateOf(false) }
+                var showEditDialog by remember { mutableStateOf(false) }
+                var showPlaylistDialog by remember { mutableStateOf(false) }
+
+                val favTracks by viewModel.favoriteTracks.collectAsStateWithLifecycle()
+                val isFavorite = favTracks.any { it.id == track.id }
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onVideoSelect(track) },
-                    colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.5f))
+                        .pointerInput(track.id) {
+                            detectTapGestures(
+                                onTap = { onVideoSelect(track) },
+                                onLongPress = { showContextSheet = true }
+                            )
+                        },
+                    colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(150.jpgToDp())
+                            .height(100.dp)
                     ) {
                         if (thumbnailState.value != null) {
                             Image(
@@ -2211,7 +2400,7 @@ fun VideosPanel(
                                     imageVector = Icons.Rounded.Videocam,
                                     contentDescription = "Fallback",
                                     tint = colors.primary.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(56.dp)
+                                    modifier = Modifier.size(36.dp)
                                 )
                             }
                         }
@@ -2220,12 +2409,12 @@ fun VideosPanel(
                         Box(
                             modifier = Modifier
                                 .align(Alignment.Center)
-                                .size(48.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
                                 .background(colors.primary.copy(alpha = 0.85f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.Black)
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.Black, modifier = Modifier.size(20.dp))
                         }
 
                         // Duration banner
@@ -2233,23 +2422,79 @@ fun VideosPanel(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
-                                    .padding(8.dp)
+                                    .padding(4.dp)
                                     .background(Color.Black.copy(alpha = 0.7f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
                             ) {
                                 Text(
                                     text = formatTime(track.duration.toInt()),
                                     color = Color.White,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
                         }
                     }
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(track.displayTitle, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                        Text(track.folder, style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text = track.displayTitle,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = track.folder,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
+                }
+
+                if (showContextSheet) {
+                    ContextMenuBottomSheet(
+                        track = track,
+                        isFavorite = isFavorite,
+                        onDismiss = { showContextSheet = false },
+                        colors = colors,
+                        onToggleFavorite = { viewModel.toggleFavorite(track) },
+                        onToggleEnglish = { viewModel.toggleEnglishTrack(track) },
+                        onEdit = {
+                            showEditDialog = true
+                            showContextSheet = false
+                        },
+                        onAddToPlaylist = {
+                            showPlaylistDialog = true
+                            showContextSheet = false
+                        },
+                        onDelete = {
+                            viewModel.deleteTrack(track)
+                            showContextSheet = false
+                        }
+                    )
+                }
+
+                if (showEditDialog) {
+                    MetadataEditDialog(
+                        track = track,
+                        colors = colors,
+                        onDismiss = { showEditDialog = false },
+                        onSave = { t, a, ur, f, perm ->
+                            viewModel.editTrackMetadata(track.id, t, a, ur, f, perm)
+                            showEditDialog = false
+                        }
+                    )
+                }
+
+                if (showPlaylistDialog) {
+                    AddToPlaylistDialog(
+                        track = track,
+                        viewModel = viewModel,
+                        colors = colors,
+                        onDismiss = { showPlaylistDialog = false }
+                    )
                 }
             }
         }
@@ -2264,6 +2509,10 @@ fun FoldersDashboard(viewModel: PlayerViewModel, colors: ThemeColors) {
     val folders by viewModel.availableFolders.collectAsStateWithLifecycle()
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
     var selectedFolderDetail by remember { mutableStateOf<String?>(null) }
+
+    val foldersToShow = remember(folders, allTracks) {
+        folders.filter { fold -> allTracks.any { it.folder == fold && !it.isVideo } }
+    }
 
     if (selectedFolderDetail != null) {
         val tracksInF = allTracks.filter { it.folder == selectedFolderDetail && !it.isVideo }
@@ -2288,14 +2537,14 @@ fun FoldersDashboard(viewModel: PlayerViewModel, colors: ThemeColors) {
             TracksListPanel(tracks = tracksInF, viewModel = viewModel, colors = colors)
         }
     } else {
-        if (folders.isEmpty()) {
+        if (foldersToShow.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Cero carpetas localizadas.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(folders) { fold ->
-                    val cnt = allTracks.count { it.folder == fold }
+                items(foldersToShow) { fold ->
+                    val cnt = allTracks.count { it.folder == fold && !it.isVideo }
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3600,12 +3849,16 @@ fun VideoPlayerFrameOverlay(
 ) {
     val context = LocalContext.current
     var isControlsVisible by remember { mutableStateOf(true) }
-    var useWideScale by remember { mutableStateOf(false) }
+    var videoZoom by remember { mutableFloatStateOf(1f) }
     val isPlayingVideo = remember { mutableStateOf(true) }
 
     val pos = remember { mutableStateOf(0) }
     val dur = remember { mutableStateOf(0) }
     var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+    val transformState = rememberTransformableState { zoomChange, _, _ ->
+        videoZoom = (videoZoom * zoomChange).coerceIn(1f, 5f)
+    }
 
     // Intercept back button to close/minimize the video view instead of exiting!
     BackHandler {
@@ -3643,7 +3896,12 @@ fun VideoPlayerFrameOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable { isControlsVisible = !isControlsVisible }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { isControlsVisible = !isControlsVisible }
+                )
+            }
+            .transformable(state = transformState)
     ) {
         if (track.filePath.startsWith("/simulated/")) {
             // Render highly interactive cyber generative canvas instead of real VideoView!
@@ -3655,8 +3913,8 @@ fun VideoPlayerFrameOverlay(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = if (useWideScale) 1.45f else 1f
-                        scaleY = if (useWideScale) 1.45f else 1f
+                        scaleX = videoZoom
+                        scaleY = videoZoom
                     }
             ) {
                 // Background dark vortex
@@ -3699,8 +3957,8 @@ fun VideoPlayerFrameOverlay(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            scaleX = if (useWideScale) 1.45f else 1f
-                            scaleY = if (useWideScale) 1.45f else 1f
+                            scaleX = videoZoom
+                            scaleY = videoZoom
                         }
                 )
             }
@@ -3748,8 +4006,22 @@ fun VideoPlayerFrameOverlay(
                         Icon(Icons.Rounded.Share, contentDescription = "Compartir", tint = Color.White)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(onClick = { useWideScale = !useWideScale }) {
-                        Icon(Icons.Rounded.AspectRatio, contentDescription = "Escala", tint = Color.White)
+                    IconButton(onClick = {
+                        videoZoom = if (videoZoom >= 5f) 1f else (videoZoom + 1f).coerceIn(1f, 5f)
+                    }) {
+                        Box(
+                            modifier = Modifier
+                                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "${String.format("%.1f", videoZoom)}x",
+                                color = colors.primary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
 

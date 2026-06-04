@@ -118,6 +118,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         AudioEngine.onPlaybackCompleted = {
             playNext()
         }
+        AudioEngine.playNextAction = {
+            playNext()
+        }
+        AudioEngine.playPrevAction = {
+            playPrevious()
+        }
 
         startTimeTracker()
     }
