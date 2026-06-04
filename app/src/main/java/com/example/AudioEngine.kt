@@ -320,10 +320,14 @@ object AudioEngine {
         val playIcon = if (isPlaying.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher_round)
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(track.displayTitle)
             .setContentText(track.displayArtist)
             .setSubText(track.album.ifEmpty { "VibPlay" })
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2)
+            )
             .addAction(android.R.drawable.ic_media_previous, "Previous", piPrev)
             .addAction(playIcon, "Play/Pause", piPlay)
             .addAction(android.R.drawable.ic_media_next, "Next", piNext)

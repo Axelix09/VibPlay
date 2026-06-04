@@ -185,53 +185,58 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val foundTracks = mutableListOf<TrackEntity>()
             val context = getApplication<Application>()
 
-            // Audio scanning
-            try {
-                val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(
-                    android.provider.MediaStore.Audio.Media._ID,
-                    android.provider.MediaStore.Audio.Media.TITLE,
-                    android.provider.MediaStore.Audio.Media.ARTIST,
-                    android.provider.MediaStore.Audio.Media.ALBUM,
-                    android.provider.MediaStore.Audio.Media.DATA,
-                    android.provider.MediaStore.Audio.Media.DURATION
-                )
-                // Filter songs of duration >= 30 seconds
-                val selection = "${android.provider.MediaStore.Audio.Media.DURATION} >= ?"
-                val selectionArgs = arrayOf("30000")
-
-                context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                    val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
-                    val artistCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ARTIST)
-                    val albumCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
-                    val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
-                    val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
-
-                    while (cursor.moveToNext()) {
-                        val title = cursor.getString(titleCol) ?: "Pista Externa"
-                        val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
-                        val album = cursor.getString(albumCol) ?: ""
-                        val path = cursor.getString(dataCol) ?: ""
-                        val dur = cursor.getLong(durCol)
-                        val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
-
-                        foundTracks.add(
-                            TrackEntity(
-                                title = title,
-                                artist = artist,
-                                album = album,
-                                filePath = path,
-                                duration = dur,
-                                folder = folderName,
-                                isLocal = true,
-                                isVideo = false
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+             // Audio scanning
+             try {
+                 val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                 val projection = arrayOf(
+                     android.provider.MediaStore.Audio.Media._ID,
+                     android.provider.MediaStore.Audio.Media.TITLE,
+                     android.provider.MediaStore.Audio.Media.ARTIST,
+                     android.provider.MediaStore.Audio.Media.ALBUM,
+                     android.provider.MediaStore.Audio.Media.DATA,
+                     android.provider.MediaStore.Audio.Media.DURATION,
+                     android.provider.MediaStore.Audio.Media.ALBUM_ID
+                 )
+                 // Filter songs of duration >= 30 seconds
+                 val selection = "${android.provider.MediaStore.Audio.Media.DURATION} >= ?"
+                 val selectionArgs = arrayOf("30000")
+ 
+                 context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                     val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
+                     val artistCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ARTIST)
+                     val albumCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
+                     val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
+                     val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
+                     val albumIdCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM_ID)
+ 
+                     while (cursor.moveToNext()) {
+                         val title = cursor.getString(titleCol) ?: "Pista Externa"
+                         val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
+                         val album = cursor.getString(albumCol) ?: ""
+                         val path = cursor.getString(dataCol) ?: ""
+                         val dur = cursor.getLong(durCol)
+                         val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
+                         val albumId = cursor.getLong(albumIdCol)
+                         val artUri = "content://media/external/audio/albumart/$albumId"
+ 
+                         foundTracks.add(
+                             TrackEntity(
+                                 title = title,
+                                 artist = artist,
+                                 album = album,
+                                 filePath = path,
+                                 duration = dur,
+                                 folder = folderName,
+                                 isLocal = true,
+                                 isVideo = false,
+                                 customArtUri = artUri
+                             )
+                         )
+                     }
+                 }
+             } catch (e: Exception) {
+                 e.printStackTrace()
+             }
 
             // Video scanning
             try {
@@ -334,12 +339,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun scanDirectoryForMedia(directory: java.io.File, foundTracks: MutableList<TrackEntity>, existingPaths: Set<String>) {
+    private fun scanDirectoryForMedia(directory: java.io.File, foundTracks: MutableList<TrackEntity>, existingPaths: Set<String>, depth: Int = 0) {
+        if (depth > 3) return // Max recursion depth to prevent infinite loops and sluggish scanning
         val files = directory.listFiles() ?: return
         for (file in files) {
             if (file.isDirectory) {
                 if (file.name != "Android" && !file.name.startsWith(".")) {
-                    scanDirectoryForMedia(file, foundTracks, existingPaths)
+                    scanDirectoryForMedia(file, foundTracks, existingPaths, depth + 1)
                 }
             } else if (file.isFile) {
                 val path = file.absolutePath
@@ -355,8 +361,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 
                 if (isAudio || isVideo) {
+                    val fileSize = file.length()
+                    
+                    // Quick size shortcut optimization:
+                    // A 30s track is typically >= 250KB. Skip smaller audio files instantly to avoid MediaMetadataRetriever overhead.
+                    if (isAudio && fileSize < 250000L) {
+                        continue
+                    }
+                    
                     val dur = estimateDuration(file) ?: 180000L // 3 minutes default fallback
-                    // Audio tracks less than 30 seconds are skipped as per the user's specific audio-filter preference
                     if (isAudio && dur < 30000L) {
                         continue
                     }

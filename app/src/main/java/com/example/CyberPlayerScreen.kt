@@ -341,7 +341,8 @@ fun CyberPlayerScreen(viewModel: PlayerViewModel = viewModel()) {
                             track = videoTrack,
                             onClose = { activeVideoTrack.value = null },
                             colors = colors,
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            onTrackChange = { activeVideoTrack.value = it }
                         )
                     }
                 }
@@ -1100,14 +1101,19 @@ fun TrackListItemCard(
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
                     )
                 } else {
-                    Image(
-                        painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
-                        contentDescription = "Default cover",
-                        alpha = 0.45f,
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(colors.primary.copy(alpha = 0.1f))
-                    )
+                            .background(colors.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (track.isVideo) Icons.Rounded.Videocam else Icons.Rounded.MusicNote,
+                            contentDescription = if (track.isVideo) "Video Icon" else "Music Icon",
+                            tint = colors.primary.copy(alpha = 0.82f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -2201,10 +2207,10 @@ fun VideosPanel(
                                     .background(Color.Black.copy(alpha = 0.6f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Image(
-                                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
+                                Icon(
+                                    imageVector = Icons.Rounded.Videocam,
                                     contentDescription = "Fallback",
-                                    alpha = 0.6f,
+                                    tint = colors.primary.copy(alpha = 0.5f),
                                     modifier = Modifier.size(56.dp)
                                 )
                             }
@@ -2422,14 +2428,19 @@ fun MiniPlayerCard(
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
                     } else {
-                        Image(
-                            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
-                            contentDescription = "Cover",
-                            alpha = 0.6f,
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(colors.primary.copy(alpha = 0.1f))
-                        )
+                                .background(colors.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (currentTrack.isVideo) Icons.Rounded.Videocam else Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = colors.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -2906,11 +2917,19 @@ fun PlayerConsoleHub(
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop
                 )
             } else {
-                Image(
-                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
-                    contentDescription = "Cover generativo",
-                    modifier = Modifier.fillMaxSize(0.8f)
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (track.isVideo) Icons.Rounded.Videocam else Icons.Rounded.MusicNote,
+                        contentDescription = "Fallback",
+                        tint = colors.primary,
+                        modifier = Modifier.size(76.dp)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
@@ -3201,12 +3220,28 @@ fun InsightsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
                                     .background(colors.surface),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Image(
-                                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
-                                    contentDescription = null,
-                                    alpha = 0.55f,
-                                    modifier = Modifier.fillMaxSize(0.7f)
-                                )
+                                if (!tr.customArtUri.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = tr.customArtUri,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(colors.primary.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (tr.isVideo) Icons.Rounded.Videocam else Icons.Rounded.MusicNote,
+                                            contentDescription = null,
+                                            tint = colors.primary,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                    }
+                                }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(tr.displayTitle, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -3560,20 +3595,47 @@ fun VideoPlayerFrameOverlay(
     track: TrackEntity,
     onClose: () -> Unit,
     colors: ThemeColors,
-    viewModel: PlayerViewModel
+    viewModel: PlayerViewModel,
+    onTrackChange: (TrackEntity) -> Unit
 ) {
+    val context = LocalContext.current
     var isControlsVisible by remember { mutableStateOf(true) }
     var useWideScale by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(1f) }
+    val isPlayingVideo = remember { mutableStateOf(true) }
 
     val pos = remember { mutableStateOf(0) }
     val dur = remember { mutableStateOf(0) }
+    var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+    // Intercept back button to close/minimize the video view instead of exiting!
+    BackHandler {
+        onClose()
+    }
 
     // Auto-hide controls loop
     LaunchedEffect(isControlsVisible) {
         if (isControlsVisible) {
             delay(4000)
             isControlsVisible = false
+        }
+    }
+
+    // Progress tracker matching real-time VideoView pos and duration
+    LaunchedEffect(videoViewInstance, isPlayingVideo.value, track.id) {
+        while (true) {
+            if (track.filePath.startsWith("/simulated/")) {
+                if (isPlayingVideo.value) {
+                    pos.value = (pos.value + 500).coerceAtMost(dur.value)
+                }
+            } else {
+                videoViewInstance?.let { vv ->
+                    if (vv.isPlaying) {
+                        pos.value = vv.currentPosition
+                        dur.value = vv.duration
+                    }
+                }
+            }
+            delay(500)
         }
     }
 
@@ -3585,6 +3647,10 @@ fun VideoPlayerFrameOverlay(
     ) {
         if (track.filePath.startsWith("/simulated/")) {
             // Render highly interactive cyber generative canvas instead of real VideoView!
+            LaunchedEffect(track.id) {
+                dur.value = if (track.duration > 0) track.duration.toInt() else 180000
+                pos.value = 0
+            }
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3615,25 +3681,29 @@ fun VideoPlayerFrameOverlay(
                 fontWeight = FontWeight.Bold
             )
         } else {
-            // Real physical VideoView
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoURI(Uri.parse(track.filePath))
-                        setOnPreparedListener { mp ->
-                            mp.isLooping = true
-                            dur.value = duration
-                            start()
+            // Real physical VideoView keyed by track ID to reconstruct cleanly on swap
+            key(track.id) {
+                AndroidView(
+                    factory = { ctx ->
+                        VideoView(ctx).apply {
+                            setVideoURI(Uri.parse(track.filePath))
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                dur.value = duration
+                                start()
+                                isPlayingVideo.value = true
+                            }
+                            videoViewInstance = this
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = if (useWideScale) 1.45f else 1f
-                        scaleY = if (useWideScale) 1.45f else 1f
-                    }
-            )
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = if (useWideScale) 1.45f else 1f
+                            scaleY = if (useWideScale) 1.45f else 1f
+                        }
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -3644,7 +3714,7 @@ fun VideoPlayerFrameOverlay(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
+                    .background(Color.Black.copy(alpha = 0.45f))
             ) {
                 // Top control bar
                 Row(
@@ -3659,46 +3729,163 @@ fun VideoPlayerFrameOverlay(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(track.displayTitle, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(track.displayArtist, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                        Text(track.displayTitle, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track.displayArtist, style = MaterialTheme.typography.bodySmall, color = Color.LightGray, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    // Share Button
+                    IconButton(onClick = {
+                        try {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, track.displayTitle)
+                                putExtra(Intent.EXTRA_TEXT, "Mira este video compartido de VibPlay: ${track.displayTitle} (${track.filePath})")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Compartir Video"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No se pudo compartir el video", Toast.LENGTH_SHORT).show()
+                        }
+                    }) {
+                        Icon(Icons.Rounded.Share, contentDescription = "Compartir", tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     IconButton(onClick = { useWideScale = !useWideScale }) {
                         Icon(Icons.Rounded.AspectRatio, contentDescription = "Escala", tint = Color.White)
                     }
                 }
 
-                // Center seek dials
+                // Center seek dials with skip previous and skip next video support!
                 Row(
                     modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(36.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { pos.value = (pos.value - 10000).coerceAtLeast(0) }) {
-                        TinyIcon(Icons.Rounded.Replay10, contentDescription = null, size = 36.dp, tint = Color.White)
+                    // Previous video
+                    IconButton(onClick = {
+                        val allVideoTracks = viewModel.allTracks.value.filter { it.isVideo }
+                        if (allVideoTracks.isNotEmpty()) {
+                            val idx = allVideoTracks.indexOfFirst { it.id == track.id }
+                            val prevIdx = if (idx > 0) idx - 1 else allVideoTracks.size - 1
+                            onTrackChange(allVideoTracks[prevIdx])
+                        }
+                    }) {
+                        TinyIcon(Icons.Rounded.SkipPrevious, contentDescription = "Video Anterior", size = 32.dp, tint = Color.White)
+                    }
+
+                    // Seek backward 10s
+                    IconButton(onClick = {
+                        if (track.filePath.startsWith("/simulated/")) {
+                            pos.value = (pos.value - 10000).coerceAtLeast(0)
+                        } else {
+                            videoViewInstance?.let { vv ->
+                                val nP = (vv.currentPosition - 10000).coerceAtLeast(0)
+                                vv.seekTo(nP)
+                                pos.value = nP
+                            }
+                        }
+                    }) {
+                        TinyIcon(Icons.Rounded.Replay10, contentDescription = "Retroceder 10s", size = 32.dp, tint = Color.White)
                     }
 
                     Box(
                         modifier = Modifier
                             .size(68.dp)
                             .clip(CircleShape)
-                            .background(colors.primary),
+                            .background(colors.primary)
+                            .clickable {
+                                if (track.filePath.startsWith("/simulated/")) {
+                                    isPlayingVideo.value = !isPlayingVideo.value
+                                } else {
+                                    videoViewInstance?.let { vv ->
+                                        if (vv.isPlaying) {
+                                            vv.pause()
+                                            isPlayingVideo.value = false
+                                        } else {
+                                            vv.start()
+                                            isPlayingVideo.value = true
+                                        }
+                                    }
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        TinyIcon(Icons.Rounded.Pause, contentDescription = null, size = 32.dp, tint = Color.Black)
+                        TinyIcon(
+                            imageVector = if (isPlayingVideo.value) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = "Reproducir",
+                            size = 32.dp,
+                            tint = Color.Black
+                        )
                     }
 
-                    IconButton(onClick = { pos.value = (pos.value + 10000).coerceAtMost(dur.value) }) {
-                        TinyIcon(Icons.Rounded.Forward10, contentDescription = null, size = 36.dp, tint = Color.White)
+                    // Seek forward 10s
+                    IconButton(onClick = {
+                        if (track.filePath.startsWith("/simulated/")) {
+                            pos.value = (pos.value + 10000).coerceAtMost(dur.value)
+                        } else {
+                            videoViewInstance?.let { vv ->
+                                val nP = (vv.currentPosition + 10000).coerceAtMost(vv.duration)
+                                vv.seekTo(nP)
+                                pos.value = nP
+                            }
+                        }
+                    }) {
+                        TinyIcon(Icons.Rounded.Forward10, contentDescription = "Adelantar 10s", size = 32.dp, tint = Color.White)
+                    }
+
+                    // Next video
+                    IconButton(onClick = {
+                        val allVideoTracks = viewModel.allTracks.value.filter { it.isVideo }
+                        if (allVideoTracks.isNotEmpty()) {
+                            val idx = allVideoTracks.indexOfFirst { it.id == track.id }
+                            val nextIdx = if (idx != -1 && idx < allVideoTracks.size - 1) idx + 1 else 0
+                            onTrackChange(allVideoTracks[nextIdx])
+                        }
+                    }) {
+                        TinyIcon(Icons.Rounded.SkipNext, contentDescription = "Siguiente Video", size = 32.dp, tint = Color.White)
                     }
                 }
 
-                // Bottom Seek Controllers
+                // Bottom Seek Controllers & Timers
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(24.dp)
                         .align(Alignment.BottomCenter)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatTime(pos.value),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = formatTime(dur.value),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Slider(
+                        value = if (dur.value > 0) pos.value.toFloat() / dur.value else 0f,
+                        onValueChange = { scale ->
+                            val targetPos = (scale * dur.value).toInt()
+                            pos.value = targetPos
+                            if (!track.filePath.startsWith("/simulated/")) {
+                                videoViewInstance?.seekTo(targetPos)
+                            }
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = colors.primary,
+                            activeTrackColor = colors.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.24f)
+                        )
+                    )
                 }
             }
         }
