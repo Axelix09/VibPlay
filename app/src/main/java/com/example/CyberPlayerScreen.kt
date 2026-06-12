@@ -374,7 +374,7 @@ fun NavigationRailComponent(activeTab: String, onTabSelect: (String) -> Unit, co
     ) {
         Spacer(modifier = Modifier.height(24.dp))
         Image(
-            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
+            painter = painterResource(R.drawable.img_vibplay_logo_1781222694320),
             contentDescription = "Logo",
             modifier = Modifier.size(48.dp)
         )
@@ -474,7 +474,7 @@ fun HeaderTitleSection(theme: ThemeStyle, colors: ThemeColors) {
             .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         Image(
-            painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
+            painter = painterResource(R.drawable.img_vibplay_logo_1781222694320),
             contentDescription = "Logo Circular",
             modifier = Modifier
                 .size(36.dp)
@@ -552,7 +552,7 @@ fun SplashScreen(progress: Float, themeColors: ThemeColors) {
                     )
                 }
                 Image(
-                    painter = painterResource(R.drawable.app_logo_vp_simple_1780536682934),
+                    painter = painterResource(R.drawable.img_vibplay_logo_1781222694320),
                     contentDescription = "Splash Logo",
                     modifier = Modifier.size(90.dp)
                 )
@@ -3553,7 +3553,7 @@ fun PlayerConsoleHub(
             ) {
                 Icon(Icons.Rounded.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Reproducir como Video (Modo Premium)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Reproducir como Video", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -4044,22 +4044,12 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Star, contentDescription = null, tint = Color(0xFFFFD700))
+                    Icon(Icons.Rounded.Headset, contentDescription = null, tint = colors.primary)
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Modo Premium: Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFFFFD700), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text("PRO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            }
-                        }
+                        Text("Modo en segundo plano", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         Text(
-                            text = "Reproducir los videos en segundo plano automáticamente al minimizar la app.",
+                            text = "Al salir de la aplicación estando en un vídeo, se seguirá reproduciendo en segundo plano",
                             fontSize = 11.sp,
                             color = Color.Gray
                         )
@@ -4252,6 +4242,7 @@ fun VideoPlayerFrameOverlay(
     var isControlsVisible by remember { mutableStateOf(true) }
     var videoZoom by remember { mutableFloatStateOf(1f) }
     val isPlayingVideo = remember { mutableStateOf(true) }
+    val isPausedByUser = remember { mutableStateOf(false) }
 
     val initialPos = if (AudioEngine.currentTrackId.value == track.id) AudioEngine.currentPosition.value else 0
     val pos = remember(track.id) { mutableStateOf(initialPos) }
@@ -4268,7 +4259,7 @@ fun VideoPlayerFrameOverlay(
     DisposableEffect(lifecycleOwner, track, isBgPremiumEnabled) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP || event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
-                if (isBgPremiumEnabled && isPlayingVideo.value) {
+                if (isBgPremiumEnabled && !isPausedByUser.value) {
                     val currentPos = if (track.filePath.startsWith("/simulated/")) pos.value else {
                         videoViewInstance?.currentPosition ?: pos.value
                     }
@@ -4384,6 +4375,7 @@ fun VideoPlayerFrameOverlay(
                                 }
                                 start()
                                 isPlayingVideo.value = true
+                                isPausedByUser.value = false
                             }
                             videoViewInstance = this
                         }
@@ -4440,18 +4432,18 @@ fun VideoPlayerFrameOverlay(
                         Icon(Icons.Rounded.Share, contentDescription = "Compartir", tint = Color.White)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    // Premium Background Play Button
+                    // Background Play Button
                     IconButton(onClick = {
                         val currentPos = if (track.filePath.startsWith("/simulated/")) pos.value else {
                             videoViewInstance?.currentPosition ?: pos.value
                         }
                         viewModel.playVideoAsBackgroundAudio(track, currentPos)
                         onClose()
-                        Toast.makeText(context, "⭐ Modo Premium: Audio en segundo plano activado", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Audio en segundo plano activado", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(
                             imageVector = Icons.Rounded.Headset,
-                            contentDescription = "Segundo plano (Premium)",
+                            contentDescription = "Segundo plano",
                             tint = colors.primary
                         )
                     }
@@ -4516,14 +4508,17 @@ fun VideoPlayerFrameOverlay(
                             .clickable {
                                 if (track.filePath.startsWith("/simulated/")) {
                                     isPlayingVideo.value = !isPlayingVideo.value
+                                    isPausedByUser.value = !isPlayingVideo.value
                                 } else {
                                     videoViewInstance?.let { vv ->
                                         if (vv.isPlaying) {
                                             vv.pause()
                                             isPlayingVideo.value = false
+                                            isPausedByUser.value = true
                                         } else {
                                             vv.start()
                                             isPlayingVideo.value = true
+                                            isPausedByUser.value = false
                                         }
                                     }
                                 }

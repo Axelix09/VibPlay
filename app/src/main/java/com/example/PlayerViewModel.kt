@@ -55,7 +55,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 customArtUri = arts[track.id] ?: track.customArtUri,
                 folder = folders[track.id] ?: track.folder
             )
-        }.filter { !it.isLocal || it.filePath.startsWith("/simulated/") || java.io.File(it.filePath).exists() }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favoriteTracks: StateFlow<List<TrackEntity>> = allTracks.map { list ->
@@ -96,9 +96,24 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         // Seed database if empty - NO MORE DEFAULT HARDCODED MUSIC/VIDEOS AS REQUESTED BY USER
+        // Also prune any rogue non-media files (e.g. from node_modules) detected in database
         viewModelScope.launch(Dispatchers.IO) {
             repository.allTracks.first().let { list ->
-                // Keep the database clean without mock items so user can scan or add real tracks
+                val rogueTracks = list.filter { track ->
+                    val pathLower = track.filePath.lowercase()
+                    val isDts = pathLower.endsWith(".d.ts")
+                    val isInExcludeDir = pathLower.contains("node_modules") || pathLower.contains("bower_components")
+                    val isSmallTs = track.filePath.endsWith(".ts", ignoreCase = true) && !track.filePath.startsWith("/simulated/") && run {
+                        val f = java.io.File(track.filePath)
+                        f.exists() && f.length() < 2000000L
+                    }
+                    isDts || isInExcludeDir || isSmallTs
+                }
+                if (rogueTracks.isNotEmpty()) {
+                    for (track in rogueTracks) {
+                        repository.deleteTrack(track)
+                    }
+                }
             }
         }
 
@@ -361,7 +376,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val files = directory.listFiles() ?: return
         for (file in files) {
             if (file.isDirectory) {
-                if (file.name != "Android" && !file.name.startsWith(".")) {
+                val nameLower = file.name.lowercase()
+                val isExcludedDir = nameLower.startsWith(".") || nameLower in setOf(
+                    "android", "node_modules", "bower_components", "dist", "build", 
+                    "temp", "tmp", "gradle", "bin", "obj", "src", "assets", "public", ".git", "next"
+                )
+                if (!isExcludedDir) {
                     scanDirectoryForMedia(file, foundTracks, existingPaths, foundPaths, depth + 1)
                 }
             } else if (file.isFile) {
@@ -369,6 +389,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 if (existingPaths.contains(path) || !foundPaths.add(path)) continue
                 val ext = file.extension.lowercase()
                 
+                // Keep .ts videos from being confused with TypeScript files
+                if (ext == "ts") {
+                    if (path.endsWith(".d.ts", ignoreCase = true) || file.length() < 2000000L) {
+                        continue
+                    }
+                }
+
                 // Absolute global support of ALL standard & exotic audio/video format extensions
                 val isAudio = ext in setOf(
                     "mp3", "wav", "m4a", "aac", "flac", "ogg", "wma", "opus", "mid", "midi", "amr", "mpga", "mka", "ra", "ape", "alac", "aif", "aiff"
