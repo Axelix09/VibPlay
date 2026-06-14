@@ -3934,6 +3934,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
     val playTheme by viewModel.currentTheme.collectAsStateWithLifecycle()
     val bubbleEnabled by viewModel.isFloatingBubbleEnabled.collectAsStateWithLifecycle()
     var creatorCreditsDialog by remember { mutableStateOf(false) }
+    var isThemesExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -3963,14 +3964,60 @@ fun SettingsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
             border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.2f))
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Intercambiar Estilo Activo:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isThemesExpanded = !isThemesExpanded },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Estilo Activo:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = when (playTheme) {
+                                ThemeStyle.CYBERPUNK -> "Cyberpunk"
+                                ThemeStyle.LUXURY -> "Luxury Gold"
+                                ThemeStyle.LAVA -> "Volcanic Lava"
+                                ThemeStyle.TOXIC -> "Biochemical Toxic"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (isThemesExpanded) "Ocultar temas" else "Ver temas",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.accent
+                        )
+                        Icon(
+                            imageVector = if (isThemesExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
 
-                ThemeSelectionBar(
-                    activeTheme = playTheme,
-                    onSelect = { viewModel.selectTheme(it) },
-                    colors = colors
-                )
+                AnimatedVisibility(
+                    visible = isThemesExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        ThemeSelectionBar(
+                            activeTheme = playTheme,
+                            onSelect = { viewModel.selectTheme(it) },
+                            colors = colors
+                        )
+                    }
+                }
             }
         }
 
