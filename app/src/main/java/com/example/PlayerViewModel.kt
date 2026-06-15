@@ -89,9 +89,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val currentQueue = MutableStateFlow<List<TrackEntity>>(emptyList())
     val currentQueueIndex = MutableStateFlow(-1)
 
-    // Active track flow derived from queue index
-    val currentTrack: StateFlow<TrackEntity?> = combine(currentQueue, currentQueueIndex) { list, idx ->
-        if (idx in list.indices) list[idx] else null
+    // Active track flow derived from queue index and allTracks to keep details always synchronized and updated instantly
+    val currentTrack: StateFlow<TrackEntity?> = combine(currentQueue, currentQueueIndex, allTracks) { list, idx, tracksList ->
+        if (idx in list.indices) {
+            val qTrack = list[idx]
+            tracksList.find { it.id == qTrack.id } ?: qTrack
+        } else {
+            null
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     init {
@@ -203,6 +208,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val foundTracks = mutableListOf<TrackEntity>()
             val context = getApplication<Application>()
 
+            // Get all existing tracks in database to prevent duplicates and protect custom metadata
+            val existingTracks = repository.allTracks.first()
+            val existingPaths = existingTracks.map { it.filePath }.toSet()
+
              // Audio scanning
              try {
                  val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -236,6 +245,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                          val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
                          val albumId = cursor.getLong(albumIdCol)
                          val artUri = "content://media/external/audio/albumart/$albumId"
+                         if (existingPaths.contains(path)) continue
                          if (isRogueFile(path)) continue
  
                          foundTracks.add(
@@ -279,6 +289,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         val path = cursor.getString(dataCol) ?: ""
                         val dur = cursor.getLong(durCol)
                         val folderName = java.io.File(path).parentFile?.name ?: "Videos"
+                        if (existingPaths.contains(path)) continue
 
                         if (isRogueFile(path)) continue
 
@@ -601,7 +612,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun editTrackMetadata(id: Long, title: String, artist: String, artUrl: String?, folder: String, isPermanent: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             if (isPermanent) {
-                allTracks.value.find { it.id == id }?.let { original ->
+                repository.getTrackById(id)?.let { original ->
                     val updated = original.copy(
                         customTitle = title,
                         customArtist = artist,

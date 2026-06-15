@@ -23,6 +23,9 @@ interface MusicDao {
     @Query("DELETE FROM tracks WHERE id = :id")
     suspend fun deleteTrackById(id: Long)
 
+    @Query("SELECT * FROM tracks WHERE id = :id LIMIT 1")
+    suspend fun getTrackById(id: Long): TrackEntity?
+
     @Query("SELECT * FROM playlists ORDER BY id DESC")
     fun getAllPlaylists(): Flow<List<PlaylistEntity>>
 

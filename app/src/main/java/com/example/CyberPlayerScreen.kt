@@ -1421,11 +1421,26 @@ fun MetadataEditDialog(
     var permanent by remember { mutableStateOf(true) }
     var artUri by remember { mutableStateOf(track.customArtUri ?: "") }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            artUri = uri.toString()
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val destFile = java.io.File(context.filesDir, "custom_art_${track.id}_${System.currentTimeMillis()}.jpg")
+                    destFile.outputStream().use { output ->
+                        inputStream.copyTo(output)
+                    }
+                    artUri = destFile.absolutePath
+                } else {
+                    artUri = uri.toString()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                artUri = uri.toString()
+            }
         }
     }
 

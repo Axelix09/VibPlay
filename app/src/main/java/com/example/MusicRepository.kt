@@ -11,6 +11,7 @@ class MusicRepository(private val musicDao: MusicDao) {
     suspend fun updateTrack(track: TrackEntity) = musicDao.updateTrack(track)
     suspend fun deleteTrack(track: TrackEntity) = musicDao.deleteTrack(track)
     suspend fun deleteTrackById(id: Long) = musicDao.deleteTrackById(id)
+    suspend fun getTrackById(id: Long): TrackEntity? = musicDao.getTrackById(id)
 
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long = musicDao.insertPlaylist(playlist)
     suspend fun updatePlaylist(playlist: PlaylistEntity) = musicDao.updatePlaylist(playlist)
