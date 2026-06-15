@@ -100,14 +100,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             repository.allTracks.first().let { list ->
                 val rogueTracks = list.filter { track ->
-                    val pathLower = track.filePath.lowercase()
-                    val isDts = pathLower.endsWith(".d.ts")
-                    val isInExcludeDir = pathLower.contains("node_modules") || pathLower.contains("bower_components")
-                    val isSmallTs = track.filePath.endsWith(".ts", ignoreCase = true) && !track.filePath.startsWith("/simulated/") && run {
-                        val f = java.io.File(track.filePath)
-                        f.exists() && f.length() < 2000000L
-                    }
-                    isDts || isInExcludeDir || isSmallTs
+                    isRogueFile(track.filePath)
                 }
                 if (rogueTracks.isNotEmpty()) {
                     for (track in rogueTracks) {
@@ -243,6 +236,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                          val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
                          val albumId = cursor.getLong(albumIdCol)
                          val artUri = "content://media/external/audio/albumart/$albumId"
+                         if (isRogueFile(path)) continue
  
                          foundTracks.add(
                              TrackEntity(
@@ -285,6 +279,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         val path = cursor.getString(dataCol) ?: ""
                         val dur = cursor.getLong(durCol)
                         val folderName = java.io.File(path).parentFile?.name ?: "Videos"
+
+                        if (isRogueFile(path)) continue
 
                         foundTracks.add(
                             TrackEntity(
@@ -387,6 +383,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             } else if (file.isFile) {
                 val path = file.absolutePath
                 if (existingPaths.contains(path) || !foundPaths.add(path)) continue
+                if (isRogueFile(path)) continue
                 val ext = file.extension.lowercase()
                 
                 // Keep .ts videos from being confused with TypeScript files
@@ -451,6 +448,31 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 // ignore
             }
         }
+    }
+
+    private fun isRogueFile(filePath: String): Boolean {
+        val pathLower = filePath.lowercase()
+        if (pathLower.startsWith("/simulated/")) return false
+        
+        val isDts = pathLower.endsWith(".d.ts")
+        val isD = pathLower.endsWith(".d") || pathLower.contains(".d/") || pathLower.contains(".d.ts")
+        val isInExcludeDir = pathLower.contains("node_modules") || 
+                            pathLower.contains("bower_components") || 
+                            pathLower.contains(".git") || 
+                            pathLower.contains("build/") || 
+                            pathLower.contains("dist/") || 
+                            pathLower.contains("tmp/") || 
+                            pathLower.contains("temp/")
+        
+        val isSmallTs = pathLower.endsWith(".ts") && run {
+            try {
+                val f = java.io.File(filePath)
+                f.exists() && f.length() < 2000000L
+            } catch (e: Exception) {
+                false
+            }
+        }
+        return isDts || isD || isInExcludeDir || isSmallTs
     }
 
     fun onTrackSelected(track: TrackEntity, queue: List<TrackEntity>) {

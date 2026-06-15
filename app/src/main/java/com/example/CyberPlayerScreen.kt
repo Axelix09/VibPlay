@@ -3800,7 +3800,7 @@ fun InsightsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
         )
 
         // Lazy row of items
-        val listSorted = allTracks.sortedByDescending { it.lastPlayedAt }.take(6)
+        val listSorted = allTracks.filter { it.lastPlayedAt > 0 }.sortedByDescending { it.lastPlayedAt }.take(6)
         if (listSorted.isEmpty()) {
             Text("No has reproducido canciones aún.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp))
         } else {
