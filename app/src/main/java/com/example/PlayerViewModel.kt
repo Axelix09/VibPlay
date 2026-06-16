@@ -33,6 +33,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     // Loading overlay / Scanner
     val isScanning = MutableStateFlow(false)
+    private val scanLock = kotlinx.coroutines.sync.Mutex()
 
     // Temporary session-only overrides
     private val tempTitles = MutableStateFlow<Map<Long, String>>(emptyMap())
@@ -204,171 +205,181 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun scanDeviceFiles() {
         viewModelScope.launch(Dispatchers.IO) {
-            isScanning.value = true
-            val foundTracks = mutableListOf<TrackEntity>()
-            val context = getApplication<Application>()
-
-            // Get all existing tracks in database to prevent duplicates and protect custom metadata
-            val existingTracks = repository.allTracks.first()
-            val existingPaths = existingTracks.map { it.filePath }.toSet()
-
-             // Audio scanning
-             try {
-                 val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                 val projection = arrayOf(
-                     android.provider.MediaStore.Audio.Media._ID,
-                     android.provider.MediaStore.Audio.Media.TITLE,
-                     android.provider.MediaStore.Audio.Media.ARTIST,
-                     android.provider.MediaStore.Audio.Media.ALBUM,
-                     android.provider.MediaStore.Audio.Media.DATA,
-                     android.provider.MediaStore.Audio.Media.DURATION,
-                     android.provider.MediaStore.Audio.Media.ALBUM_ID
-                 )
-                 // Filter songs of duration >= 30 seconds
-                 val selection = "${android.provider.MediaStore.Audio.Media.DURATION} >= ?"
-                 val selectionArgs = arrayOf("30000")
- 
-                 context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                     val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
-                     val artistCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ARTIST)
-                     val albumCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
-                     val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
-                     val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
-                     val albumIdCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM_ID)
- 
-                     while (cursor.moveToNext()) {
-                         val title = cursor.getString(titleCol) ?: "Pista Externa"
-                         val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
-                         val album = cursor.getString(albumCol) ?: ""
-                         val path = cursor.getString(dataCol) ?: ""
-                         val dur = cursor.getLong(durCol)
-                         val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
-                         val albumId = cursor.getLong(albumIdCol)
-                         val artUri = "content://media/external/audio/albumart/$albumId"
-                         if (existingPaths.contains(path)) continue
-                         if (isRogueFile(path)) continue
- 
-                         foundTracks.add(
-                             TrackEntity(
-                                 title = title,
-                                 artist = artist,
-                                 album = album,
-                                 filePath = path,
-                                 duration = dur,
-                                 folder = folderName,
-                                 isLocal = true,
-                                 isVideo = false,
-                                 customArtUri = artUri
-                             )
-                         )
-                     }
-                 }
-             } catch (e: Exception) {
-                 e.printStackTrace()
-             }
-
-            // Video scanning
-            try {
-                val uri = android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(
-                    android.provider.MediaStore.Video.Media._ID,
-                    android.provider.MediaStore.Video.Media.TITLE,
-                    android.provider.MediaStore.Video.Media.DATA,
-                    android.provider.MediaStore.Video.Media.DURATION
-                )
-                val selection: String? = null
-                val selectionArgs: Array<String>? = null
-
-                context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                    val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.TITLE)
-                    val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA)
-                    val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DURATION)
-
-                    while (cursor.moveToNext()) {
-                        val title = cursor.getString(titleCol) ?: "Video Local"
-                        val path = cursor.getString(dataCol) ?: ""
-                        val dur = cursor.getLong(durCol)
-                        val folderName = java.io.File(path).parentFile?.name ?: "Videos"
-                        if (existingPaths.contains(path)) continue
-
-                        if (isRogueFile(path)) continue
-
-                        foundTracks.add(
-                            TrackEntity(
-                                title = title,
-                                artist = "Video Studio",
-                                album = "Clips",
-                                filePath = path,
-                                duration = dur,
-                                folder = folderName,
-                                isLocal = true,
-                                isVideo = true
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            if (!scanLock.tryLock()) {
+                return@launch // Already running a scan, ignore concurrent requests
             }
-
-            // Deep storage scanning for any exotic audio/video format not caught by MediaStore
             try {
-                val existingPaths = allTracks.value.map { it.filePath }.toSet()
-                val foundPaths = foundTracks.map { it.filePath }.toMutableSet()
-                val rootsToScan = mutableListOf<java.io.File>()
-                
-                // Primary external storage root
-                val externalDir = android.os.Environment.getExternalStorageDirectory()
-                if (externalDir != null && externalDir.exists()) {
-                    rootsToScan.add(externalDir)
+                isScanning.value = true
+                val foundTracks = mutableListOf<TrackEntity>()
+                val context = getApplication<Application>()
+
+                // Get all existing tracks in database to prevent duplicates and protect custom metadata
+                val existingTracks = repository.allTracks.first()
+                val existingPaths = existingTracks.map { it.filePath.trim().lowercase() }.toSet()
+
+                 // Audio scanning
+                 try {
+                     val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                     val projection = arrayOf(
+                         android.provider.MediaStore.Audio.Media._ID,
+                         android.provider.MediaStore.Audio.Media.TITLE,
+                         android.provider.MediaStore.Audio.Media.ARTIST,
+                         android.provider.MediaStore.Audio.Media.ALBUM,
+                         android.provider.MediaStore.Audio.Media.DATA,
+                         android.provider.MediaStore.Audio.Media.DURATION,
+                         android.provider.MediaStore.Audio.Media.ALBUM_ID
+                     )
+                     // Filter songs of duration >= 30 seconds
+                     val selection = "${android.provider.MediaStore.Audio.Media.DURATION} >= ?"
+                     val selectionArgs = arrayOf("30000")
+  
+                     context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                         val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
+                         val artistCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ARTIST)
+                         val albumCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
+                         val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
+                         val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
+                         val albumIdCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM_ID)
+  
+                         while (cursor.moveToNext()) {
+                             val title = cursor.getString(titleCol) ?: "Pista Externa"
+                             val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
+                             val album = cursor.getString(albumCol) ?: ""
+                             val path = cursor.getString(dataCol) ?: ""
+                             val dur = cursor.getLong(durCol)
+                             val folderName = java.io.File(path).parentFile?.name ?: "All Beats"
+                             val albumId = cursor.getLong(albumIdCol)
+                             val artUri = "content://media/external/audio/albumart/$albumId"
+                             
+                             val normalizedPath = path.trim()
+                             if (existingPaths.contains(normalizedPath.lowercase())) continue
+                             if (isRogueFile(normalizedPath)) continue
+  
+                             foundTracks.add(
+                                 TrackEntity(
+                                     title = title,
+                                     artist = artist,
+                                     album = album,
+                                     filePath = normalizedPath,
+                                     duration = dur,
+                                     folder = folderName,
+                                     isLocal = true,
+                                     isVideo = false,
+                                     customArtUri = artUri
+                                 )
+                             )
+                         }
+                     }
+                 } catch (e: Exception) {
+                     e.printStackTrace()
+                 }
+
+                // Video scanning
+                try {
+                    val uri = android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    val projection = arrayOf(
+                        android.provider.MediaStore.Video.Media._ID,
+                        android.provider.MediaStore.Video.Media.TITLE,
+                        android.provider.MediaStore.Video.Media.DATA,
+                        android.provider.MediaStore.Video.Media.DURATION
+                    )
+                    val selection: String? = null
+                    val selectionArgs: Array<String>? = null
+
+                    context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                        val titleCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.TITLE)
+                        val dataCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA)
+                        val durCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DURATION)
+
+                        while (cursor.moveToNext()) {
+                            val title = cursor.getString(titleCol) ?: "Video Local"
+                            val path = cursor.getString(dataCol) ?: ""
+                            val dur = cursor.getLong(durCol)
+                            val folderName = java.io.File(path).parentFile?.name ?: "Videos"
+                            
+                            val normalizedPath = path.trim()
+                            if (existingPaths.contains(normalizedPath.lowercase())) continue
+                            if (isRogueFile(normalizedPath)) continue
+
+                            foundTracks.add(
+                                TrackEntity(
+                                    title = title,
+                                    artist = "Video Studio",
+                                    album = "Clips",
+                                    filePath = normalizedPath,
+                                    duration = dur,
+                                    folder = folderName,
+                                    isLocal = true,
+                                    isVideo = true
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-                
-                // Secondary SD cards or external directories
-                val files = context.getExternalFilesDirs(null)
-                for (f in files) {
-                    if (f != null) {
-                        val p = f.absolutePath
-                        val idx = p.indexOf("/Android")
-                        if (idx != -1) {
-                            val root = java.io.File(p.substring(0, idx))
-                            if (root.exists() && !rootsToScan.contains(root)) {
-                                rootsToScan.add(root)
+
+                // Deep storage scanning for any exotic audio/video format not caught by MediaStore
+                try {
+                    val existingPathsLower = allTracks.value.map { it.filePath.trim().lowercase() }.toSet()
+                    val foundPathsLower = foundTracks.map { it.filePath.trim().lowercase() }.toMutableSet()
+                    val rootsToScan = mutableListOf<java.io.File>()
+                    
+                    // Primary external storage root
+                    val externalDir = android.os.Environment.getExternalStorageDirectory()
+                    if (externalDir != null && externalDir.exists()) {
+                        rootsToScan.add(externalDir)
+                    }
+                    
+                    // Secondary SD cards or external directories
+                    val files = context.getExternalFilesDirs(null)
+                    for (f in files) {
+                        if (f != null) {
+                            val p = f.absolutePath
+                            val idx = p.indexOf("/Android")
+                            if (idx != -1) {
+                                val root = java.io.File(p.substring(0, idx))
+                                if (root.exists() && !rootsToScan.contains(root)) {
+                                    rootsToScan.add(root)
+                                }
                             }
                         }
                     }
-                }
 
-                // Scan common media and documents subfolders of root to be precise and highly performant
-                val subDirNames = listOf(
-                    android.os.Environment.DIRECTORY_MUSIC,
-                    android.os.Environment.DIRECTORY_PODCASTS,
-                    android.os.Environment.DIRECTORY_MOVIES,
-                    android.os.Environment.DIRECTORY_DOWNLOADS,
-                    android.os.Environment.DIRECTORY_DCIM,
-                    android.os.Environment.DIRECTORY_DOCUMENTS,
-                    "Bluetooth",
-                    "Recordings"
-                )
+                    // Scan common media and documents subfolders of root to be precise and highly performant
+                    val subDirNames = listOf(
+                        android.os.Environment.DIRECTORY_MUSIC,
+                        android.os.Environment.DIRECTORY_PODCASTS,
+                        android.os.Environment.DIRECTORY_MOVIES,
+                        android.os.Environment.DIRECTORY_DOWNLOADS,
+                        android.os.Environment.DIRECTORY_DCIM,
+                        android.os.Environment.DIRECTORY_DOCUMENTS,
+                        "Bluetooth",
+                        "Recordings"
+                    )
 
-                for (root in rootsToScan) {
-                    for (subName in subDirNames) {
-                        val subDir = java.io.File(root, subName)
-                        if (subDir.exists() && subDir.isDirectory) {
-                            scanDirectoryForMedia(subDir, foundTracks, existingPaths, foundPaths)
+                    for (root in rootsToScan) {
+                        for (subName in subDirNames) {
+                            val subDir = java.io.File(root, subName)
+                            if (subDir.exists() && subDir.isDirectory) {
+                                scanDirectoryForMedia(subDir, foundTracks, existingPathsLower, foundPathsLower)
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
 
-            if (foundTracks.isNotEmpty()) {
-                // Filter out duplicates by path to avoid DB UNIQUE constraint violations
-                val uniqueNewTracks = foundTracks.distinctBy { it.filePath }
-                repository.insertTracks(uniqueNewTracks)
+                if (foundTracks.isNotEmpty()) {
+                    // Filter out duplicates by path to avoid DB UNIQUE constraint violations
+                    val uniqueNewTracks = foundTracks.distinctBy { it.filePath.trim().lowercase() }
+                    repository.insertTracks(uniqueNewTracks)
+                }
+                delay(1500) // Aesthetic delay for progress indicator
+            } finally {
+                isScanning.value = false
+                scanLock.unlock()
             }
-            delay(1500) // Aesthetic delay for progress indicator
-            isScanning.value = false
         }
     }
 
@@ -393,15 +404,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } else if (file.isFile) {
                 val path = file.absolutePath
-                if (existingPaths.contains(path) || !foundPaths.add(path)) continue
-                if (isRogueFile(path)) continue
+                val normalizedPath = path.trim()
+                if (existingPaths.contains(normalizedPath.lowercase()) || !foundPaths.add(normalizedPath.lowercase())) continue
+                if (isRogueFile(normalizedPath)) continue
                 val ext = file.extension.lowercase()
                 
                 // Keep .ts videos from being confused with TypeScript files
                 if (ext == "ts") {
-                    if (path.endsWith(".d.ts", ignoreCase = true) || file.length() < 2000000L) {
+                    if (normalizedPath.endsWith(".d.ts", ignoreCase = true) || file.length() < 2000000L) {
                         continue
-                    }
+                     }
                 }
 
                 // Absolute global support of ALL standard & exotic audio/video format extensions
@@ -431,7 +443,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                             title = file.nameWithoutExtension.replace("_", " ").replace("-", " "),
                             artist = if (isVideo) "Video Local" else "Artista Local",
                             album = if (isVideo) "Clips" else "Album Local",
-                            filePath = path,
+                            filePath = normalizedPath,
                             duration = dur,
                             folder = file.parentFile?.name ?: (if (isVideo) "Videos" else "All Beats"),
                             isLocal = true,
@@ -611,6 +623,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun editTrackMetadata(id: Long, title: String, artist: String, artUrl: String?, folder: String, isPermanent: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
+            // ALWAYS update the temporary in-memory maps first for INSTANT UI state updates in real time
+            val titles = tempTitles.value.toMutableMap()
+            titles[id] = title
+            tempTitles.value = titles
+
+            val artists = tempArtists.value.toMutableMap()
+            artists[id] = artist
+            tempArtists.value = artists
+
+            val uris = tempArtUris.value.toMutableMap()
+            uris[id] = artUrl ?: ""
+            tempArtUris.value = uris
+
+            val foldersMap = tempFolders.value.toMutableMap()
+            foldersMap[id] = folder
+            tempFolders.value = foldersMap
+
             if (isPermanent) {
                 repository.getTrackById(id)?.let { original ->
                     val updated = original.copy(
@@ -621,22 +650,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     )
                     repository.updateTrack(updated)
                 }
-            } else {
-                val titles = tempTitles.value.toMutableMap()
-                titles[id] = title
-                tempTitles.value = titles
-
-                val artists = tempArtists.value.toMutableMap()
-                artists[id] = artist
-                tempArtists.value = artists
-
-                val uris = tempArtUris.value.toMutableMap()
-                uris[id] = artUrl ?: ""
-                tempArtUris.value = uris
-
-                val foldersMap = tempFolders.value.toMutableMap()
-                foldersMap[id] = folder
-                tempFolders.value = foldersMap
             }
         }
     }
@@ -732,14 +745,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addManualTrack(title: String, artist: String, path: String, isVideo: Boolean, folder: String, artUri: String? = null, isEnglish: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
+            val normalizedPath = path.trim()
+            val exists = repository.allTracks.first().any { it.filePath.trim().equals(normalizedPath, ignoreCase = true) }
+            if (exists) return@launch // Prevent adding manual duplicate track with the same filepath
             val track = TrackEntity(
                 title = title,
                 artist = artist,
                 album = "Manual Import",
-                filePath = path,
+                filePath = normalizedPath,
                 duration = 180000,
                 folder = folder,
-                isLocal = !path.startsWith("http") && !path.startsWith("https"),
+                isLocal = !normalizedPath.startsWith("http") && !normalizedPath.startsWith("https"),
                 isVideo = isVideo,
                 customArtUri = artUri,
                 isEnglish = isEnglish

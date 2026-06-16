@@ -88,6 +88,33 @@ data class ThemeColors(
     val accent: Color
 )
 
+fun copyUriToLocalStorage(context: android.content.Context, uri: android.net.Uri, prefix: String): String {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        if (inputStream != null) {
+            val destFile = java.io.File(context.filesDir, "${prefix}_" + System.currentTimeMillis() + ".jpg")
+            destFile.outputStream().use { output ->
+                inputStream.copyTo(output)
+            }
+            destFile.absolutePath
+        } else {
+            uri.toString()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        uri.toString()
+    }
+}
+
+fun getCoilModel(artUri: String?): Any? {
+    if (artUri.isNullOrEmpty()) return null
+    return if (artUri.startsWith("/") || artUri.startsWith("file://")) {
+        java.io.File(artUri.removePrefix("file://"))
+    } else {
+        artUri
+    }
+}
+
 @Composable
 fun getThemeColors(theme: ThemeStyle): ThemeColors {
     return when (theme) {
@@ -1106,7 +1133,7 @@ fun TrackListItemCard(
             ) {
                 if (!track.customArtUri.isNullOrEmpty()) {
                     AsyncImage(
-                        model = track.customArtUri,
+                        model = getCoilModel(track.customArtUri),
                         contentDescription = "Default cover",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -1426,21 +1453,7 @@ fun MetadataEditDialog(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val destFile = java.io.File(context.filesDir, "custom_art_${track.id}_${System.currentTimeMillis()}.jpg")
-                    destFile.outputStream().use { output ->
-                        inputStream.copyTo(output)
-                    }
-                    artUri = destFile.absolutePath
-                } else {
-                    artUri = uri.toString()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                artUri = uri.toString()
-            }
+            artUri = copyUriToLocalStorage(context, uri, "custom_art_${track.id}")
         }
     }
 
@@ -1739,11 +1752,12 @@ fun CreatePlaylistDialog(viewModel: PlayerViewModel, colors: ThemeColors, onDism
     var desc by remember { mutableStateOf("") }
     var coverUrl by remember { mutableStateOf("") }
 
+    val context = LocalContext.current
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            coverUrl = uri.toString()
+            coverUrl = copyUriToLocalStorage(context, uri, "playlist_art")
         }
     }
 
@@ -1952,11 +1966,12 @@ fun EditPlaylistDialog(
     var desc by remember { mutableStateOf(playlist.description) }
     var coverUrl by remember { mutableStateOf(playlist.coverUrl ?: "") }
 
+    val context = LocalContext.current
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            coverUrl = uri.toString()
+            coverUrl = copyUriToLocalStorage(context, uri, "playlist_art_${playlist.id}")
         }
     }
 
@@ -2152,7 +2167,7 @@ fun PlaylistsDashboard(
                 ) {
                     if (!freshPlaylist.coverUrl.isNullOrEmpty()) {
                         AsyncImage(
-                            model = freshPlaylist.coverUrl,
+                            model = getCoilModel(freshPlaylist.coverUrl),
                             contentDescription = "Playlist Cover",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -2341,7 +2356,7 @@ fun PlaylistsDashboard(
                                 ) {
                                     if (!play.coverUrl.isNullOrEmpty()) {
                                         AsyncImage(
-                                            model = play.coverUrl,
+                                            model = getCoilModel(play.coverUrl),
                                             contentDescription = "Playlist Cover",
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -3023,7 +3038,7 @@ fun MiniPlayerCard(
                 ) {
                     if (!currentTrack.customArtUri.isNullOrEmpty()) {
                         AsyncImage(
-                            model = currentTrack.customArtUri,
+                            model = getCoilModel(currentTrack.customArtUri),
                             contentDescription = "Cover",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -3517,7 +3532,7 @@ fun PlayerConsoleHub(
         ) {
             if (!track.customArtUri.isNullOrEmpty()) {
                 AsyncImage(
-                    model = track.customArtUri,
+                    model = getCoilModel(track.customArtUri),
                     contentDescription = "Cover generativo",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -3842,7 +3857,7 @@ fun InsightsScreen(viewModel: PlayerViewModel, colors: ThemeColors) {
                             ) {
                                 if (!tr.customArtUri.isNullOrEmpty()) {
                                     AsyncImage(
-                                        model = tr.customArtUri,
+                                        model = getCoilModel(tr.customArtUri),
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -5001,11 +5016,12 @@ fun AddManualTrackDialog(
     var artUri by remember { mutableStateOf("") }
     var isEnglish by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            artUri = uri.toString()
+            artUri = copyUriToLocalStorage(context, uri, "manual_art")
         }
     }
 
