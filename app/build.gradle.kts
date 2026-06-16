@@ -132,15 +132,28 @@ abstract class CopyApkTask : org.gradle.api.DefaultTask() {
   fun performCopy() {
     val src = apkSource.get()
     val dest = rootApk.get()
+    println("--- COPY APK DIAGNOSTICS ---")
+    println("Source path: ${src.absolutePath}")
+    println("Source exists: ${src.exists()}")
+    if (src.exists()) {
+      println("Source size: ${src.length()} bytes")
+    }
+    println("Destination path: ${dest.absolutePath}")
+    println("Destination exists: ${dest.exists()}")
     if (src.exists()) {
       src.copyTo(dest, overwrite = true)
+      println("Copy completed successfully!")
+      println("Destination size after copy: ${dest.length()} bytes")
+    } else {
+      println("WARNING: SOURCE APK DOES NOT EXIST, COPY SKIPPED!")
     }
+    println("----------------------------")
   }
 }
 
 tasks.register<CopyApkTask>("copyApkToRoot") {
   apkSource.set(file("${layout.buildDirectory.get()}/outputs/apk/debug/app-debug.apk"))
-  rootApk.set(file("/app-debug.apk"))
+  rootApk.set(file("${rootDir}/app-debug.apk"))
 }
 
 tasks.matching { it.name == "assembleDebug" }.configureEach {
