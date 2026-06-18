@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -6,14 +8,42 @@ plugins {
   alias(libs.plugins.secrets)
 }
 
+// Automatically restore the original debug.keystore from base64 if it is missing
+val b64File = if (file("/debug.keystore.base64").exists()) file("/debug.keystore.base64") else file("${rootDir}/debug.keystore.base64")
+if (b64File.exists()) {
+  val decodedBytes: ByteArray? = try {
+    val base64Content = b64File.readText().replace("\\s".toRegex(), "").trim()
+    Base64.getDecoder().decode(base64Content)
+  } catch (e: Exception) {
+    try {
+      Base64.getMimeDecoder().decode(b64File.readText().trim())
+    } catch (e2: Exception) {
+      null
+    }
+  }
+  if (decodedBytes != null) {
+    listOf(file("${rootDir}/debug.keystore"), file("/debug.keystore")).forEach { f ->
+      try {
+        if (!f.exists() || f.length() == 0L) {
+          f.parentFile?.mkdirs()
+          f.writeBytes(decodedBytes)
+          println("Successfully restored keystore to: ${f.absolutePath}")
+        }
+      } catch (e: Exception) {
+        println("Could not write keystore to ${f.absolutePath}: ${e.message}")
+      }
+    }
+  }
+}
+
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.vibplay.axelixx"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 35
     versionCode = 1
     versionName = "1.0"
 
@@ -121,39 +151,31 @@ dependencies {
   "ksp"(libs.moshi.kotlin.codegen)
 }
 
-abstract class CopyApkTask : org.gradle.api.DefaultTask() {
-  @get:org.gradle.api.tasks.InputFile
-  abstract val apkSource: org.gradle.api.provider.Property<java.io.File>
-
-  @get:org.gradle.api.tasks.OutputFile
-  abstract val rootApk: org.gradle.api.provider.Property<java.io.File>
-
-  @org.gradle.api.tasks.TaskAction
-  fun performCopy() {
-    val src = apkSource.get()
-    val dest = rootApk.get()
+tasks.register("copyApkToRoot") {
+  doLast {
+    val src = file("${layout.buildDirectory.get()}/outputs/apk/debug/app-debug.apk")
+    val dest = file("${rootDir}/app-debug.apk")
+    val altDest = file("/app-debug.apk")
     println("--- COPY APK DIAGNOSTICS ---")
     println("Source path: ${src.absolutePath}")
     println("Source exists: ${src.exists()}")
     if (src.exists()) {
       println("Source size: ${src.length()} bytes")
-    }
-    println("Destination path: ${dest.absolutePath}")
-    println("Destination exists: ${dest.exists()}")
-    if (src.exists()) {
       src.copyTo(dest, overwrite = true)
-      println("Copy completed successfully!")
-      println("Destination size after copy: ${dest.length()} bytes")
+      println("Copy to ${dest.absolutePath} completed successfully! Size: ${dest.length()} bytes")
+      try {
+        if (altDest.absolutePath != dest.absolutePath) {
+          src.copyTo(altDest, overwrite = true)
+          println("Copy to ${altDest.absolutePath} completed successfully! Size: ${altDest.length()} bytes")
+        }
+      } catch (e: Exception) {
+        println("Could not copy to alt path ${altDest.absolutePath}: ${e.message}")
+      }
     } else {
       println("WARNING: SOURCE APK DOES NOT EXIST, COPY SKIPPED!")
     }
     println("----------------------------")
   }
-}
-
-tasks.register<CopyApkTask>("copyApkToRoot") {
-  apkSource.set(file("${layout.buildDirectory.get()}/outputs/apk/debug/app-debug.apk"))
-  rootApk.set(file("${rootDir}/app-debug.apk"))
 }
 
 tasks.matching { it.name == "assembleDebug" }.configureEach {
