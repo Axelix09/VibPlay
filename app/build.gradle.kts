@@ -38,7 +38,7 @@ if (b64File.exists()) {
 
 android {
   namespace = "com.example"
-  compileSdk = 36
+  compileSdk = 35
 
   defaultConfig {
     applicationId = "com.vibplay.axelixx"
