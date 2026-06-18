@@ -154,22 +154,27 @@ dependencies {
 tasks.register("copyApkToRoot") {
   doLast {
     val src = file("${layout.buildDirectory.get()}/outputs/apk/debug/app-debug.apk")
-    val dest = file("${rootDir}/app-debug.apk")
-    val altDest = file("/app-debug.apk")
+    val targets = listOf(
+      file("${rootDir}/app-debug.apk"),
+      file("${rootDir}/app-preview.apk"),
+      file("/app-debug.apk"),
+      file("/app-preview.apk"),
+      file("/.build-outputs/app-debug.apk"),
+      file("/.build-outputs/app-preview.apk")
+    )
     println("--- COPY APK DIAGNOSTICS ---")
     println("Source path: ${src.absolutePath}")
     println("Source exists: ${src.exists()}")
     if (src.exists()) {
       println("Source size: ${src.length()} bytes")
-      src.copyTo(dest, overwrite = true)
-      println("Copy to ${dest.absolutePath} completed successfully! Size: ${dest.length()} bytes")
-      try {
-        if (altDest.absolutePath != dest.absolutePath) {
-          src.copyTo(altDest, overwrite = true)
-          println("Copy to ${altDest.absolutePath} completed successfully! Size: ${altDest.length()} bytes")
+      targets.forEach { target ->
+        try {
+          target.parentFile?.mkdirs()
+          src.copyTo(target, overwrite = true)
+          println("Copy to ${target.absolutePath} completed successfully! Size: ${target.length()} bytes")
+        } catch (e: Exception) {
+          println("Could not copy to ${target.absolutePath}: ${e.message}")
         }
-      } catch (e: Exception) {
-        println("Could not copy to alt path ${altDest.absolutePath}: ${e.message}")
       }
     } else {
       println("WARNING: SOURCE APK DOES NOT EXIST, COPY SKIPPED!")
