@@ -28,10 +28,12 @@ jobs:
         touch .env
 
     - name: Setup Gradle
-      uses: gradle/gradle-build-action@v3
+      uses: gradle/actions/setup-gradle@v3
 
     - name: Build APK Debug
-      run: gradle assembleDebug --stacktrace
+      run: gradle assembleDebug --stacktrace --no-daemon
+      env:
+        _JAVA_OPTIONS: "-Djava.awt.headless=true"
 
     - name: Upload APK Debug
       uses: actions/upload-artifact@v4
@@ -42,8 +44,10 @@ jobs:
         retention-days: 30
 
     - name: Build APK Release
-      run: gradle assembleRelease --stacktrace
+      run: gradle assembleRelease --stacktrace --no-daemon
       continue-on-error: true
+      env:
+        _JAVA_OPTIONS: "-Djava.awt.headless=true"
 
     - name: Upload APK Release
       uses: actions/upload-artifact@v4
