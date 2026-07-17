@@ -27,11 +27,11 @@ jobs:
       run: |
         touch .env
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v3
 
     - name: Build APK Debug
-      run: ./gradlew assembleDebug --stacktrace
+      run: gradle assembleDebug --stacktrace
 
     - name: Upload APK Debug
       uses: actions/upload-artifact@v4
@@ -42,7 +42,7 @@ jobs:
         retention-days: 30
 
     - name: Build APK Release
-      run: ./gradlew assembleRelease --stacktrace
+      run: gradle assembleRelease --stacktrace
       continue-on-error: true
 
     - name: Upload APK Release
